@@ -33,7 +33,7 @@
 
 <div class="box">
   <div class="row">
-    <label for="calcYear">산정 기준 연도</label>
+    <label for="calcYear">산정 기준일</label>
     <input type="number" id="calcYear" value="2026" style="width:90px">
     년
     <label for="calcMonth" style="margin-left:12px;">월</label>
@@ -41,7 +41,7 @@
     <label for="calcDay">일</label>
     <input type="number" id="calcDay" min="1" max="31" value="1" style="width:60px">
   </div>
-  <div class="note">※ 연도 입력 시 연차유급휴가 사용기간(해당 연도 3/1 ~ 다음 연도 2월 말일)이 자동 설정됩니다.</div>
+  <div class="note">※ 이 날짜가 엑셀 서식의 C1(연도), K3(발생일자), X4(전년도)에 자동 반영됩니다.</div>
 
   <div class="row">
     <label for="manualAdjust">소정근로일수 수동 가감(일)</label>
@@ -71,6 +71,7 @@
       <th>근무형태 (X)</th>
       <th>최초채용일 (AI)</th>
       <th>전임경력 (AY)</th>
+      <th>주간근로시간 (AF)</th>
       <th>근속기간(현경력)</th>
       <th>적용 소정근로일수</th>
       <th>기본발생</th>
@@ -86,17 +87,24 @@
    ========================================================= */
 const TEMPLATE_FILENAME = '교육공무직원 가용 연차유급휴가 일수 산출내역.xlsx';
 
+// 인사기록의 근무형태(X열) 표기 -> 엑셀 서식 G열에 실제로 들어갈 표기
+// 서식에서 요구하는 정확한 문구가 다르면 이 표만 수정하면 됩니다.
+const WORK_TYPE_MAP = {
+  '상시근무자': '상시전일근무자',
+  '방학중비근무자': '방학중비근무자'
+};
+
 const EXCEL_CONFIG = {
   sourceCols: {
     name: 5,            // F열: 성명
     jobType: 7,          // H열: 직종
     workType: 23,        // X열: 근무형태
     firstHireDate: 34,   // AI열: 최초채용일
+    weeklyHours: 31,      // AF열: 주간 근로시간(예: 40, 25)
     previousCareer: 50   // AY열: 전임경력
   },
   sourceDataStartRow: 1,
 
-  // 한글/공백이 포함된 파일명은 반드시 encodeURIComponent로 인코딩해서 요청해야 함
   templateUrl: './' + encodeURIComponent(TEMPLATE_FILENAME),
 
   sheets: {
@@ -104,12 +112,13 @@ const EXCEL_CONFIG = {
     calendar: '달력'
   },
   cells: {
-    inputYear: 'C1',
+    inputYear: 'C1',       // 산정 기준 연도 (쉼표 없는 일반 숫자서식 강제)
+    occurrenceDate: 'K3',  // 발생일자 (산정 기준일 그대로)
+    sheet1PrevYear: 'X4',  // 1번째 시트 전년도
     leavePeriod: 'E2',
-    previousYear: 'B1'
+    previousYear: 'B1'     // 달력 시트 전년도
   },
-  // 서식에서 순번 "1"이 실제로 있는 행 번호로 반드시 확인 후 수정하세요.
-  employeeStartRow: 8,
+  employeeStartRow: 6,     // C6부터 데이터 입력
   maxTemplateRows: 200,
   columns: {
     sequence: 'A',
@@ -183,7 +192,7 @@ function getLeaveUsePeriod(year) {
 }
 
 /* =========================================================
-   2. 전임경력(연 단위) 추출
+   2. 전임경력(연 단위) / 주간근로시간 추출
    ========================================================= */
 function extractCareerYears(value) {
   if (value === null || value === undefined || value === '') return 0;
@@ -195,6 +204,30 @@ function extractCareerYears(value) {
 
   const numberMatch = text.match(/(\d+(\.\d+)?)/);
   return numberMatch ? Math.floor(Number(numberMatch[1])) : 0;
+}
+
+function extractWeeklyHours(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number') return value;
+
+  const text = String(value).trim();
+  const match = text.match(/(\d+(\.\d+)?)/);
+  return match ? Number(match[1]) : null;
+}
+
+// 주간 근로시간을 일 기준시간으로 환산 (주 5일 기준: 40시간 -> 8시간, 25시간 -> 5시간)
+function getStandardHours(weeklyHoursValue) {
+  const weeklyHours = extractWeeklyHours(weeklyHoursValue);
+  if (weeklyHours === null) return '';
+
+  const dailyHours = weeklyHours / 5;
+  // 소수점 첫째 자리까지만 (예: 6.25 -> 6.3 등 원치 않으면 이 줄 조정)
+  return Math.round(dailyHours * 10) / 10;
+}
+
+function mapWorkType(rawWorkType) {
+  const key = String(rawWorkType || '').trim();
+  return WORK_TYPE_MAP[key] || key;
 }
 
 /* =========================================================
@@ -286,6 +319,7 @@ function parsePersonnelRecords(workbook) {
       jobType: String(row[cols.jobType] || '').trim(),
       workType: String(row[cols.workType] || '').trim(),
       firstHireDate: row[cols.firstHireDate],
+      weeklyHours: row[cols.weeklyHours],
       previousCareer: row[cols.previousCareer]
     });
   }
@@ -309,6 +343,7 @@ function renderResultTable(rows) {
       <td>${r.workType}</td>
       <td>${r.firstHireDateText}</td>
       <td>${r.previousCareerText}</td>
+      <td>${r.weeklyHoursText}</td>
       <td>${r.serviceLabel}</td>
       <td>${r.appliedWorkingDays}</td>
       <td>${r.baseDays}</td>
@@ -347,7 +382,7 @@ document.getElementById('parseBtn').addEventListener('click', async () => {
     const persons = parsePersonnelRecords(workbook);
 
     if (persons.length === 0) {
-      setStatus('인사기록에서 유효한 데이터를 찾지 못했습니다. 열 위치(F/H/X/AI/AY)를 확인해 주세요.', true);
+      setStatus('인사기록에서 유효한 데이터를 찾지 못했습니다. 열 위치(F/H/X/AF/AI/AY)를 확인해 주세요.', true);
       downloadBtn.disabled = true;
       return;
     }
@@ -365,11 +400,13 @@ document.getElementById('parseBtn').addEventListener('click', async () => {
     calculatedRows = persons.map((p) => {
       const calc = calcAnnualLeave(p, baseDate, manualAdjust);
       const hireDate = parseDateValue(p.firstHireDate);
+      const weeklyHours = extractWeeklyHours(p.weeklyHours);
 
       return {
         ...p,
         firstHireDateText: hireDate ? hireDate.toISOString().slice(0, 10) : String(p.firstHireDate || ''),
         previousCareerText: String(p.previousCareer || ''),
+        weeklyHoursText: weeklyHours === null ? '' : `${weeklyHours}시간`,
         ...calc
       };
     });
@@ -397,7 +434,8 @@ function escapeXml(str) {
     .replace(/'/g, '&apos;');
 }
 
-function setCellInSheetXml(xml, ref, value, type) {
+// forceStyleIndex를 지정하면 기존 s 속성을 무시하고 그 스타일을 강제 적용 (예: 쉼표 없는 숫자서식)
+function setCellInSheetXml(xml, ref, value, type, forceStyleIndex) {
   const cellRegex = new RegExp(
     `<c r="${ref}"([^>]*?)(?:/>|>([\\s\\S]*?)</c>)`
   );
@@ -409,8 +447,14 @@ function setCellInSheetXml(xml, ref, value, type) {
   }
 
   const existingAttrs = match[1] || '';
-  const styleMatch = existingAttrs.match(/\ss="(\d+)"/);
-  const styleAttr = styleMatch ? ` s="${styleMatch[1]}"` : '';
+  let styleAttr = '';
+
+  if (forceStyleIndex !== undefined && forceStyleIndex !== null) {
+    styleAttr = ` s="${forceStyleIndex}"`;
+  } else {
+    const styleMatch = existingAttrs.match(/\ss="(\d+)"/);
+    styleAttr = styleMatch ? ` s="${styleMatch[1]}"` : '';
+  }
 
   let newCellXml;
 
@@ -433,12 +477,12 @@ function setCellInSheetXml(xml, ref, value, type) {
   return xml.slice(0, match.index) + newCellXml + xml.slice(match.index + match[0].length);
 }
 
-function setDateCellInSheetXml(xml, ref, dateValue) {
+function setDateCellInSheetXml(xml, ref, dateValue, forceStyleIndex) {
   const date = parseDateValue(dateValue);
   if (!date) {
-    return setCellInSheetXml(xml, ref, dateValue ? String(dateValue) : '', 's');
+    return setCellInSheetXml(xml, ref, dateValue ? String(dateValue) : '', 's', forceStyleIndex);
   }
-  return setCellInSheetXml(xml, ref, dateToExcelSerial(date), 'n');
+  return setCellInSheetXml(xml, ref, dateToExcelSerial(date), 'n', forceStyleIndex);
 }
 
 async function buildSheetPathMap(zip) {
@@ -467,22 +511,29 @@ async function buildSheetPathMap(zip) {
   return sheetMap;
 }
 
-function getStandardHours(jobType, workType) {
-  const type = String(workType || '').replace(/\s/g, '');
-  if (type.includes('방학중비근무')) return '';
+// styles.xml의 cellXfs에 "쉼표 없는 일반 숫자" 서식을 새로 추가하고 그 인덱스를 반환
+async function ensureGeneralNumberStyle(zip) {
+  const stylesPath = 'xl/styles.xml';
+  let stylesXml = await zip.file(stylesPath).async('string');
 
-  const fullTimeJobs = [
-    '교무행정실무원', '교무행정사', '전산실무원',
-    '행정실무원', '행정실무원(호봉제)', '행정실무원(월급제)',
-    '특수교육실무원', '영양사', '조리사', '조리원',
-    '시설관리원', '과학실험실무원', '교육복지사', '치료사',
-    '전문상담사', '방과후학교운영실무원'
-  ];
+  const cellXfsMatch = stylesXml.match(/<cellXfs count="(\d+)">([\s\S]*?)<\/cellXfs>/);
+  if (!cellXfsMatch) {
+    console.warn('styles.xml에서 cellXfs를 찾지 못해 C1 서식 강제 적용을 건너뜁니다.');
+    return null;
+  }
 
-  const job = String(jobType || '').replace(/\s/g, '');
-  if (fullTimeJobs.includes(job)) return 8;
-  if (job.includes('돌봄')) return 6;
-  return '';
+  const currentCount = parseInt(cellXfsMatch[1], 10);
+  const newIndex = currentCount;
+
+  // numFmtId="1" = 내장 서식 "0" (정수, 천 단위 구분기호 없음)
+  const newXf = '<xf numFmtId="1" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>';
+  const newBlock = cellXfsMatch[2] + newXf;
+  const newCellXfs = `<cellXfs count="${currentCount + 1}">${newBlock}</cellXfs>`;
+
+  stylesXml = stylesXml.replace(cellXfsMatch[0], newCellXfs);
+  zip.file(stylesPath, stylesXml);
+
+  return newIndex;
 }
 
 /* =========================================================
@@ -490,6 +541,9 @@ function getStandardHours(jobType, workType) {
    ========================================================= */
 downloadBtn.addEventListener('click', async () => {
   const year = Number(document.getElementById('calcYear').value);
+  const month = Number(document.getElementById('calcMonth').value);
+  const day = Number(document.getElementById('calcDay').value);
+  const baseDate = new Date(year, (month || 1) - 1, day || 1);
 
   if (!calculatedRows || calculatedRows.length === 0) {
     setStatus('먼저 인사기록을 업로드하고 연차유급휴가 계산을 실행해 주세요.', true);
@@ -499,7 +553,11 @@ downloadBtn.addEventListener('click', async () => {
   try {
     setStatus('엑셀 서식을 불러오는 중입니다...');
 
-    const response = await fetch(EXCEL_CONFIG.templateUrl);
+    const response = await fetch(
+      EXCEL_CONFIG.templateUrl + '?v=' + Date.now(),
+      { cache: 'no-store' }
+    );
+
     if (!response.ok) {
       throw new Error(
         `엑셀 서식 파일을 불러오지 못했습니다. (${response.status}) 경로: ${EXCEL_CONFIG.templateUrl}\n` +
@@ -525,13 +583,20 @@ downloadBtn.addEventListener('click', async () => {
     if (!annualPath) throw new Error(`'${EXCEL_CONFIG.sheets.annual}' 시트를 찾을 수 없습니다.`);
     if (!calendarPath) throw new Error(`'${EXCEL_CONFIG.sheets.calendar}' 시트를 찾을 수 없습니다.`);
 
+    // C1 전용 "쉼표 없는 숫자" 서식 준비
+    const generalStyleIndex = await ensureGeneralNumberStyle(zip);
+
     let annualXml = await zip.file(annualPath).async('string');
     let calendarXml = await zip.file(calendarPath).async('string');
 
-    annualXml = setCellInSheetXml(annualXml, EXCEL_CONFIG.cells.inputYear, year, 'n');
+    // 공통 입력값
+    annualXml = setCellInSheetXml(annualXml, EXCEL_CONFIG.cells.inputYear, year, 'n', generalStyleIndex);
+    annualXml = setDateCellInSheetXml(annualXml, EXCEL_CONFIG.cells.occurrenceDate, baseDate);
+    annualXml = setCellInSheetXml(annualXml, EXCEL_CONFIG.cells.sheet1PrevYear, year - 1, 'n');
     annualXml = setCellInSheetXml(annualXml, EXCEL_CONFIG.cells.leavePeriod, getLeaveUsePeriod(year), 's');
     calendarXml = setCellInSheetXml(calendarXml, EXCEL_CONFIG.cells.previousYear, year - 1, 'n');
 
+    // 직원별 데이터
     calculatedRows.forEach((person, index) => {
       const row = EXCEL_CONFIG.employeeStartRow + index;
       const col = EXCEL_CONFIG.columns;
@@ -540,10 +605,11 @@ downloadBtn.addEventListener('click', async () => {
       annualXml = setCellInSheetXml(annualXml, `${col.jobType}${row}`, person.jobType || '', 's');
       annualXml = setCellInSheetXml(annualXml, `${col.name}${row}`, person.name || '', 's');
       annualXml = setCellInSheetXml(annualXml, `${col.birthDate}${row}`, person.birthDate || '', 's');
-      annualXml = setCellInSheetXml(annualXml, `${col.workType}${row}`, person.workType || '', 's');
+      annualXml = setCellInSheetXml(annualXml, `${col.workType}${row}`, mapWorkType(person.workType), 's');
       annualXml = setDateCellInSheetXml(annualXml, `${col.firstHireDate}${row}`, person.firstHireDate);
       annualXml = setCellInSheetXml(annualXml, `${col.previousCareerYears}${row}`, extractCareerYears(person.previousCareer), 'n');
-      annualXml = setCellInSheetXml(annualXml, `${col.standardHours}${row}`, getStandardHours(person.jobType, person.workType), 'n');
+      annualXml = setCellInSheetXml(annualXml, `${col.standardHours}${row}`, getStandardHours(person.weeklyHours), 'n');
+      // 출근의무일수 등 계산식이 걸린 열은 채우지 않음 (서식 자체 수식이 계산)
     });
 
     zip.file(annualPath, annualXml);
