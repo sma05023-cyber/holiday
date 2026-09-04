@@ -183,6 +183,7 @@
         <li><strong>1년 이상 근로자만 작성하세요.(근로기준법 제60조제2항 미구현)</strong></li>
         <li><strong>전임경력은 반드시 검토하세요.</strong></li>
         <li>STEP1에서 방학중 비근무일을 먼저 계산하면 소정근로일수에 자동 반영됩니다.</li>
+        <li>인사기록 G열의 주민번호 앞 6자리를 읽어 생년월일(19YY-MM-DD)을 자동 산출, 엑셀 서식 F열에 반영합니다.</li>
         <li>엑셀 서식은 20번째까지 자동 입력, 다운로드 가능합니다.</li>
       </ol>
     </div>
@@ -201,6 +202,7 @@
             <tr>
               <th>순번</th>
               <th>성명</th>
+              <th>생년월일</th>
               <th>직종</th>
               <th>근무형태</th>
               <th>최초채용일</th>
@@ -383,6 +385,7 @@ const WORK_TYPE_MAP = {
 const EXCEL_CONFIG = {
   sourceCols: {
     name: 5,
+    birthDate: 6,
     jobType: 7,
     workType: 23,
     firstHireDate: 34,
@@ -598,6 +601,17 @@ function parseDateValue(value) {
   return null;
 }
 
+/* 주민번호 앞 6자리(YYMMDD)를 읽어 19YY-MM-DD 문자열로 변환 (인사기록 G열용) */
+function extractBirthDateFromSSN(value) {
+  if (value === null || value === undefined || value === '') return '';
+  const digits = String(value).replace(/[^0-9]/g, '');
+  if (digits.length < 6) return '';
+  const yy = digits.slice(0, 2);
+  const mm = digits.slice(2, 4);
+  const dd = digits.slice(4, 6);
+  return `19${yy}-${mm}-${dd}`;
+}
+
 function dateToExcelSerial(date) {
   const utcDate = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
   const excelEpoch = Date.UTC(1899, 11, 30);
@@ -738,6 +752,7 @@ function parsePersonnelRecords(workbook) {
 
     persons.push({
       name: String(name).trim(),
+      birthDateRaw: row[cols.birthDate], // G열: 주민번호 앞자리(6자리 이상)
       jobType: String(row[cols.jobType] || '').trim(),
       workType: String(row[cols.workType] || '').trim(),
       firstHireDate: row[cols.firstHireDate],
@@ -761,6 +776,7 @@ function renderResultTable(rows) {
     tr.innerHTML = `
       <td>${idx + 1}</td>
       <td>${r.name}</td>
+      <td>${r.birthDateText || '-'}</td>
       <td>${r.jobType}</td>
       <td>${r.workType}</td>
       <td>${r.firstHireDateText}</td>
@@ -826,6 +842,7 @@ document.getElementById('parseBtn').addEventListener('click', async () => {
 
       return {
         ...p,
+        birthDateText: extractBirthDateFromSSN(p.birthDateRaw), // 주민번호 앞 6자리 → 19YY-MM-DD
         firstHireDateText: hireDate ? hireDate.toISOString().slice(0, 10) : String(p.firstHireDate || ''),
         previousCareerText: String(p.previousCareer || ''),
         weeklyHoursText: weeklyHours === null ? '' : `${weeklyHours}시간`,
@@ -1041,7 +1058,7 @@ downloadBtn.addEventListener('click', async () => {
       annualXml = setCellInSheetXml(annualXml, `${col.sequence}${row}`, index + 1, 'n');
       annualXml = setCellInSheetXml(annualXml, `${col.jobType}${row}`, person.jobType || '', 's');
       annualXml = setCellInSheetXml(annualXml, `${col.name}${row}`, person.name || '', 's');
-      annualXml = setCellInSheetXml(annualXml, `${col.birthDate}${row}`, person.birthDate || '', 's');
+      annualXml = setCellInSheetXml(annualXml, `${col.birthDate}${row}`, person.birthDateText || '', 's');
       annualXml = setCellInSheetXml(annualXml, `${col.workType}${row}`, mapWorkType(person.workType), 's');
       annualXml = setDateCellInSheetXml(annualXml, `${col.firstHireDate}${row}`, person.firstHireDate);
       annualXml = setCellInSheetXml(annualXml, `${col.previousCareerYears}${row}`, extractCareerYears(person.previousCareer), 'n');
