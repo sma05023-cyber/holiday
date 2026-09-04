@@ -123,18 +123,6 @@
     <span class="step-tag">STEP 2</span>
     <h2 class="card-title">연차유급휴가 계산</h2>
 
-    <div class="guide-box">
-      <h3>📌 사용설명서</h3>
-      <ol>
-        <li><strong>전년도 근무상황관리-> 기타, 완결로 놓고 조회 후(엑셀 다운로드)</strong></li>
-        <li><strong>교육공무직등인사 -> 인사기록</strong> → <strong>인사기록관리</strong> → <strong>인사기록(엑셀 다운로드)</strong></li>
-        <li><strong>기준일 설정 후 계산</strong> → <strong>확인 후 엑셀 다운로드</strong></li>
-        <li><strong>1년 이상 근로자만 작성하세요.(근로기준법 제60조제2항 미구현)</strong></li>
-        <li><strong>전임경력은 반드시 검토하세요.</strong></li>
-        <li>STEP1에서 방학중 비근무일을 먼저 계산하면 소정근로일수에 자동 반영됩니다.</li>
-      </ol>
-    </div>
-
     <div class="form-group">
       <label class="form-label">산정 기준일</label>
       <div class="date-input-group">
@@ -153,7 +141,6 @@
         <button type="button" class="calendar-btn" id="calendarBtn" title="달력에서 선택">📅</button>
         <input type="date" id="calcDatePicker" class="hidden-date-picker" tabindex="-1">
       </div>
-      <div class="label-sub">※ 연도 4자리를 입력하면 자동으로 월 칸으로 이동합니다. 이 날짜는 엑셀 서식의 C1(연도)·K3(발생일자)·X4(전년도)에 자동 반영됩니다.</div>
     </div>
 
     <div class="form-group">
@@ -162,7 +149,7 @@
     </div>
 
     <div class="form-group">
-      <label class="form-label">소정근로일수 추가 조정 기간 (재량휴업일 등, STEP1과 별도로 있는 경우만)</label>
+      <label class="form-label">소정근로일수 추가 조정 기간</label>
       <div class="period-box">
         <div id="periodList"><div class="period-empty" id="periodEmptyText">추가된 기간이 없습니다.</div></div>
         <div class="period-btn-row">
@@ -180,6 +167,20 @@
         <span>지원 형식: .xlsx, .xls</span>
         <input type="file" id="excelFile" accept=".xlsx,.xls" style="display:none">
       </div>
+    </div>
+
+    <!-- ↓↓↓ 사용설명서 위치를 여기(연차유급휴가 계산 버튼 바로 위)로 이동 ↓↓↓ -->
+    <div class="guide-box">
+      <h3>📌 사용설명서</h3>
+      <ol>
+        <li><strong>전년도 근무상황관리-> 기타, 완결로 놓고 조회 후(엑셀 다운로드)</strong> → <strong>업로드</strong></li>
+        <li><strong>교육공무직등인사 -> 인사기록</strong> → <strong>인사기록관리</strong> → <strong>인사기록(엑셀 다운로드)</strong> → <strong>업로드</strong></li>
+        <li><strong>소정근로일수 수기 조정 필요 시 입력(선거 등)</strong></li>
+        <li><strong>기준일 설정 후 계산</strong> → <strong>확인 후 엑셀 다운로드</strong></li>
+        <li><strong>1년 이상 근로자만 작성하세요.(근로기준법 제60조제2항 미구현)</strong></li>
+        <li><strong>전임경력은 반드시 검토하세요.</strong></li>
+        <li>STEP1에서 방학중 비근무일을 먼저 계산하면 소정근로일수에 자동 반영됩니다.</li>
+      </ol>
     </div>
 
     <button type="button" class="btn-calc" id="parseBtn">연차유급휴가 계산</button>
