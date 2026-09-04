@@ -60,6 +60,8 @@
   .btn-download { width:100%; background:var(--success-soft); border:1px solid var(--success-line); color:var(--success); padding:16px; border-radius:var(--radius); font-size:1.02rem; font-weight:800; cursor:pointer; margin-top:14px; }
   .btn-download:hover { background:#dcfce7; }
   .btn-download:disabled { background:var(--canvas); border-color:var(--line); color:var(--ink-4); cursor:not-allowed; }
+  .btn-reset-block { width:100%; background:#fff; border:1px solid var(--danger-line); color:var(--danger); font-size:.95rem; font-weight:800; padding:12px; border-radius:var(--radius); cursor:pointer; margin-top:10px; }
+  .btn-reset-block:hover { background:var(--danger-soft); }
   .status-box { margin-top:14px; font-size:.9rem; font-weight:600; white-space:pre-line; padding:14px 16px; border-radius:10px; display:none; }
   .status-box.show { display:block; }
   .status-box.error { background:var(--danger-soft); border:1px solid var(--danger-line); color:var(--danger); }
@@ -108,6 +110,7 @@
     </div>
 
     <button type="button" class="btn-calc" id="vacationCalcBtn">📊 방학중 비근무일 계산하기</button>
+    <button type="button" class="btn-reset-block" id="vacationResetBtn">🔄 방학중 비근무일 초기화</button>
     <div class="status-box" id="vacationStatus"></div>
 
     <div class="table-container" id="vacationResultWrap" style="display:none; margin-top:16px;">
@@ -186,6 +189,7 @@
 
     <button type="button" class="btn-calc" id="parseBtn">연차유급휴가 계산</button>
     <button type="button" class="btn-download" id="downloadBtn" disabled>엑셀 다운로드</button>
+    <button type="button" class="btn-reset-block" id="calcResetBtn">🔄 연차 계산 결과 초기화</button>
 
     <div class="status-box" id="status"></div>
 
@@ -238,6 +242,7 @@ const vacationFileInput = document.getElementById('vacationFile');
 const vacationFileText = document.getElementById('vacationFileText');
 const vacationDropZone = document.getElementById('vacationDropZone');
 const vacationStatusEl = document.getElementById('vacationStatus');
+const VACATION_FILE_TEXT_DEFAULT = '클릭 또는 드래그하여 파일 업로드';
 
 vacationDropZone.addEventListener('dragover', (e) => { e.preventDefault(); vacationDropZone.style.borderColor = 'var(--brand)'; });
 vacationDropZone.addEventListener('dragleave', () => vacationDropZone.style.borderColor = 'var(--ink-4)');
@@ -354,6 +359,17 @@ document.getElementById('vacationCalcBtn').addEventListener('click', async () =>
   }
 });
 
+/* 방학중 비근무일 초기화 버튼: 업로드 파일/계산 결과/표/상태 메시지를 모두 초기 상태로 되돌림 */
+document.getElementById('vacationResetBtn').addEventListener('click', () => {
+  vacationRawResult = {};
+  vacationFileInput.value = '';
+  vacationFileText.textContent = VACATION_FILE_TEXT_DEFAULT;
+  document.getElementById('vacationTableBody').innerHTML = '';
+  document.getElementById('vacationResultWrap').style.display = 'none';
+  vacationStatusEl.textContent = '';
+  vacationStatusEl.className = 'status-box';
+});
+
 /* =========================================================
    STEP 2 : 연차유급휴가 계산 (원본 로직 그대로, adjustDays만 인별 자동화)
    ========================================================= */
@@ -412,6 +428,7 @@ const resultWrapper = document.getElementById('resultWrapper');
 const dropZone = document.getElementById('dropZone');
 const fileInputEl = document.getElementById('excelFile');
 const dropZoneText = document.getElementById('dropZoneText');
+const DROPZONE_TEXT_DEFAULT = '📂 인사기록 엑셀 파일을 이 곳으로 클릭 또는 드래그하여 업로드하세요.';
 
 const yearInput = document.getElementById('calcYear');
 const monthInput = document.getElementById('calcMonth');
@@ -826,6 +843,18 @@ document.getElementById('parseBtn').addEventListener('click', async () => {
     setStatus('인사기록 파일을 처리하는 중 오류가 발생했습니다.\n' + err.message, 'error');
     downloadBtn.disabled = true;
   }
+});
+
+/* 연차 계산 결과 초기화 버튼: 업로드된 인사기록 파일/계산 결과 테이블/다운로드 가능 여부/상태 메시지를 모두 초기 상태로 되돌림 */
+document.getElementById('calcResetBtn').addEventListener('click', () => {
+  calculatedRows = [];
+  fileInputEl.value = '';
+  dropZoneText.textContent = DROPZONE_TEXT_DEFAULT;
+  document.getElementById('resultBody').innerHTML = '';
+  document.getElementById('resultCount').textContent = '';
+  resultWrapper.classList.remove('show');
+  downloadBtn.disabled = true;
+  setStatus('', null);
 });
 
 function escapeXml(str) {
