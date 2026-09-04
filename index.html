@@ -3,21 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>교육공무직원 연차 자동 산출</title>
+<title>교육공무직원 연차 자동 산출 (방학중 비근무일 연동)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
   :root { --brand:#1d4ed8; --brand-ink:#1e3a8a; --brand-soft:#eef4ff; --brand-line:#c7d7fe; --ink:#111827; --ink-2:#374151; --ink-3:#6b7280; --ink-4:#9aa3af; --line:#e5e7eb; --surface:#fff; --canvas:#f5f7fa; --danger:#ef4444; --danger-soft:#fef2f2; --danger-line:#fecaca; --success:#16a34a; --success-soft:#ecfdf5; --success-line:#bbf7d0; --radius:10px; --radius-lg:14px; }
   * { box-sizing:border-box; margin:0; padding:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Pretendard",sans-serif; word-break:keep-all; }
   body { background:var(--canvas); color:var(--ink); padding:40px 16px; display:flex; justify-content:center; }
-  .page-container { width:100%; max-width:900px; }
+  .page-container { width:100%; max-width:960px; }
   .header-area { text-align:center; margin-bottom:24px; }
-  .header-title-box,.calc-card { background:var(--surface); border:1px solid var(--l인사기록 업로드ine); border-radius:var(--radius-lg); box-shadow:0 1px 2px rgba(16,24,40,.04); }
+  .header-title-box,.calc-card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-lg); box-shadow:0 1px 2px rgba(16,24,40,.04); }
   .header-title-box { padding:24px; color:var(--brand-ink); }
   .header-title-box h1 { font-size:1.6rem; font-weight:800; }
   .header-title-box p { margin-top:6px; font-size:.9rem; color:var(--ink-3); font-weight:500; }
   .calc-card { padding:35px 40px; margin-bottom:24px; }
   .card-title { text-align:center; font-size:1.3rem; font-weight:800; margin-bottom:28px; }
+  .step-tag { display:inline-block; background:var(--brand-soft); color:var(--brand-ink); font-weight:800; font-size:.8rem; padding:4px 10px; border-radius:999px; margin-bottom:10px; }
   .form-group { margin-bottom:20px; }
   .form-label { display:block; font-size:.95rem; font-weight:700; margin-bottom:9px; color:var(--ink-2); }
   .label-sub { font-size:.8rem; font-weight:600; color:var(--ink-3); line-height:1.5; margin-top:6px; }
@@ -28,13 +29,10 @@
   .input-with-unit { display:flex; align-items:center; height:48px; }
   .input-with-unit .form-input { border-radius:8px 0 0 8px; font-weight:600; text-align:right; height:48px; }
   .unit-box { height:48px; display:flex; align-items:center; background:var(--canvas); border:1px solid var(--line); border-left:0; border-radius:0 8px 8px 0; padding:0 14px; font-weight:600; color:var(--ink-3); white-space:nowrap; }
-
-  /* 산정 기준일: 비율 고정 grid + 버튼 높이 정렬 */
   .date-input-group { display:grid; grid-template-columns:2fr 1fr 1fr 48px; gap:8px; align-items:center; }
   .calendar-btn { width:48px; height:48px; background:var(--brand-soft); border:1px solid var(--brand-line); border-radius:8px; font-size:1.2rem; cursor:pointer; color:var(--brand-ink); display:flex; align-items:center; justify-content:center; }
   .calendar-btn:hover { background:var(--brand-line); }
   .hidden-date-picker { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
-
   .period-box { border:1px solid var(--line); border-radius:10px; padding:16px; background:var(--canvas); }
   .period-row { display:flex; align-items:center; gap:8px; background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:10px; }
   .period-row:last-child { margin-bottom:0; }
@@ -49,16 +47,14 @@
   .btn-remove-row { flex-shrink:0; width:34px; height:34px; background:var(--danger-soft); border:1px solid var(--danger-line); color:var(--danger); border-radius:8px; cursor:pointer; font-weight:700; }
   .btn-remove-row:hover { background:#fee2e2; }
   .period-total { margin-top:10px; font-size:.85rem; font-weight:700; color:var(--brand-ink); text-align:right; }
-
   .guide-box { background:var(--canvas); border:1px solid var(--line); border-radius:12px; padding:22px; margin-bottom:24px; }
   .guide-box h3 { font-size:1.05rem; color:var(--brand-ink); margin-bottom:10px; }
   .guide-box ol { padding-left:22px; font-size:.93rem; line-height:1.9; color:var(--ink-2); }
   .guide-box ol li strong { color:var(--brand-ink); }
-
-  .drop-zone { width:100%; padding:45px 20px; text-align:center; background:#fff; border:2px dashed var(--ink-4); border-radius:12px; color:var(--ink-3); cursor:pointer; }
+  .drop-zone { width:100%; padding:35px 20px; text-align:center; background:#fff; border:2px dashed var(--ink-4); border-radius:12px; color:var(--ink-3); cursor:pointer; }
   .drop-zone:hover { border-color:var(--brand); background:var(--brand-soft); color:var(--brand-ink); }
   .drop-zone p { font-size:1.02rem; font-weight:700; margin-bottom:8px; }
-  .btn-calc { width:100%; background:var(--brand); color:#fff; font-size:1.1rem; font-weight:800; padding:16px; border:0; border-radius:var(--radius); cursor:pointer; margin-top:10px; }
+  .btn-calc { width:100%; background:var(--brand); color:#fff; font-size:1.05rem; font-weight:800; padding:15px; border:0; border-radius:var(--radius); cursor:pointer; margin-top:10px; }
   .btn-calc:hover { background:var(--brand-ink); }
   .btn-calc:disabled { background:var(--ink-4); cursor:not-allowed; }
   .btn-download { width:100%; background:var(--success-soft); border:1px solid var(--success-line); color:var(--success); padding:16px; border-radius:var(--radius); font-size:1.02rem; font-weight:800; cursor:pointer; margin-top:14px; }
@@ -71,11 +67,13 @@
   .result-wrapper { display:none; margin-top:36px; }
   .result-wrapper.show { display:block; }
   .table-container { border-radius:10px; overflow:auto; border:1px solid var(--line); }
-  table { width:100%; border-collapse:collapse; text-align:center; font-size:.88rem; white-space:nowrap; }
-  th { background:var(--canvas); color:var(--ink); padding:12px 10px; font-weight:700; border-right:1px solid var(--line); border-bottom:1px solid var(--line); }
-  td { padding:11px 10px; border-bottom:1px solid var(--line); border-right:1px solid var(--line); color:var(--ink); }
+  table { width:100%; border-collapse:collapse; text-align:center; font-size:.86rem; white-space:nowrap; }
+  th { background:var(--canvas); color:var(--ink); padding:11px 9px; font-weight:700; border-right:1px solid var(--line); border-bottom:1px solid var(--line); }
+  td { padding:10px 9px; border-bottom:1px solid var(--line); border-right:1px solid var(--line); color:var(--ink); }
   tr:last-child td { border-bottom:0; }
   .result-count { font-size:.95rem; font-weight:700; color:var(--brand-ink); margin-bottom:14px; }
+  .badge-ok { color:var(--success); font-weight:700; }
+  .badge-warn { color:var(--ink-4); font-weight:700; }
   @media (max-width:640px) {
     body { padding:18px 10px; }
     .calc-card { padding:24px 18px; }
@@ -91,10 +89,38 @@
   <header class="header-area">
     <div class="header-title-box">
       <h1>교육공무직원 연차 계산기</h1>
+      <p>방학중 비근무일을 자동 계산해 소정근로일수에서 차감한 뒤 연차유급휴가를 산출합니다</p>
     </div>
   </header>
 
+  <!-- ===================== STEP 1: 방학중 비근무일 계산 ===================== -->
   <main class="calc-card">
+    <span class="step-tag">STEP 1</span>
+    <h2 class="card-title" style="margin-bottom:20px;">방학중 비근무일 계산 (근무상황목록 업로드)</h2>
+
+    <div class="form-group">
+      <label class="form-label">근무상황목록 파일 (NEIS 엑셀/CSV)</label>
+      <div class="drop-zone" id="vacationDropZone" onclick="document.getElementById('vacationFile').click()">
+        <p id="vacationFileText">클릭 또는 드래그하여 파일 업로드</p>
+        <span>지원 형식: .xlsx, .xls, .csv</span>
+        <input type="file" id="vacationFile" accept=".xlsx,.xls,.csv" style="display:none">
+      </div>
+    </div>
+
+    <button type="button" class="btn-calc" id="vacationCalcBtn">📊 방학중 비근무일 계산하기</button>
+    <div class="status-box" id="vacationStatus"></div>
+
+    <div class="table-container" id="vacationResultWrap" style="display:none; margin-top:16px;">
+      <table>
+        <thead><tr><th>성명</th><th>직종</th><th>방학중 비근무일수</th></tr></thead>
+        <tbody id="vacationTableBody"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- ===================== STEP 2: 연차유급휴가 계산 (원본 유지) ===================== -->
+  <main class="calc-card">
+    <span class="step-tag">STEP 2</span>
     <h2 class="card-title">연차유급휴가 계산</h2>
 
     <div class="guide-box">
@@ -104,7 +130,7 @@
         <li><strong>기준일 설정 후 계산</strong> → <strong>확인 후 엑셀 다운로드</strong></li>
         <li><strong>1년 이상 근로자만 작성하세요.(근로기준법 제60조제2항 미구현)</strong></li>
         <li><strong>전임경력은 반드시 검토하세요.</strong></li>
-        <li>EXCEL 파일 다운로드 후 소정근로일수 입력하세요.</li>
+        <li>STEP1에서 방학중 비근무일을 먼저 계산하면 소정근로일수에 자동 반영됩니다.</li>
       </ol>
     </div>
 
@@ -135,7 +161,7 @@
     </div>
 
     <div class="form-group">
-      <label class="form-label">소정근로일수 조정 기간 (재량휴업일 등)</label>
+      <label class="form-label">소정근로일수 추가 조정 기간 (재량휴업일 등, STEP1과 별도로 있는 경우만)</label>
       <div class="period-box">
         <div id="periodList"><div class="period-empty" id="periodEmptyText">추가된 기간이 없습니다.</div></div>
         <div class="period-btn-row">
@@ -174,6 +200,7 @@
               <th>전임경력</th>
               <th>주간근로시간</th>
               <th>근속기간</th>
+              <th>비근무일수(STEP1자동)</th>
               <th>적용소정근로일수</th>
               <th>기본발생</th>
               <th>최종 연차일수</th>
@@ -188,7 +215,144 @@
 
 <script>
 /* =========================================================
-   0. 공통 설정
+   STEP 1 : 방학중 비근무일 계산 (5hoursworker 로직 그대로 이식)
+   ========================================================= */
+const workingHoursMap = {
+  '초등돌봄전담사': 5.5,
+  '환경실무원': 5.5
+};
+
+const vac_colName = 2;   // C열: 성명
+const vac_colJob = 3;    // D열: 직종
+const vac_colDays = 5;   // F열: 일수/기간
+const vac_colType = 6;   // G열: 종별 (연가 등)
+const vac_colReason = 7; // H열: 사유 용무 (방학중 비근무 등)
+const VACATION_KEYWORDS = ['방학', '비근무'];
+
+let vacationRawResult = {}; // { 성명: { job, totalDays } } - STEP2 계산에서 자동 참조
+
+const vacationFileInput = document.getElementById('vacationFile');
+const vacationFileText = document.getElementById('vacationFileText');
+const vacationDropZone = document.getElementById('vacationDropZone');
+const vacationStatusEl = document.getElementById('vacationStatus');
+
+vacationDropZone.addEventListener('dragover', (e) => { e.preventDefault(); vacationDropZone.style.borderColor = 'var(--brand)'; });
+vacationDropZone.addEventListener('dragleave', () => vacationDropZone.style.borderColor = 'var(--ink-4)');
+vacationDropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  vacationDropZone.style.borderColor = 'var(--ink-4)';
+  if (e.dataTransfer.files.length) {
+    vacationFileInput.files = e.dataTransfer.files;
+    vacationFileText.textContent = `📄 ${e.dataTransfer.files[0].name}`;
+  }
+});
+vacationFileInput.addEventListener('change', () => {
+  if (vacationFileInput.files.length) vacationFileText.textContent = `📄 ${vacationFileInput.files[0].name}`;
+});
+
+function processVacationExcel(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = function (e) {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '' });
+
+        if (jsonData.length < 2) { reject('데이터가 부족하거나 잘못된 형식의 파일입니다.'); return; }
+
+        const resultData = {};
+
+        for (let i = 0; i < jsonData.length; i++) {
+          const row = jsonData[i];
+
+          const name = String(row[vac_colName] || '').trim();
+          if (!name || name.includes('성명') || name.includes('이름')) continue;
+
+          const job = String(row[vac_colJob] || '').trim();
+          const statusStr = String(row[vac_colType] || '').trim() + " " + String(row[vac_colReason] || '').trim();
+
+          const isMatch = VACATION_KEYWORDS.some(keyword => statusStr.includes(keyword));
+
+          if (isMatch) {
+            let days = 0;
+            const timeStr = String(row[vac_colDays] || '').replace(/\s/g, '');
+
+            let parsedDays = 0;
+            let parsedHours = 0;
+            let parsedMins = 0;
+
+            const dayMatch = timeStr.match(/([0-9.]+)일/);
+            if (dayMatch) {
+              parsedDays = parseFloat(dayMatch[1]);
+            } else if (!timeStr.includes('시간') && !timeStr.includes('분') && timeStr.match(/[0-9.]+/)) {
+              parsedDays = parseFloat(timeStr.match(/[0-9.]+/)[0]);
+            }
+
+            const hourMatch = timeStr.match(/([0-9.]+)시간/);
+            if (hourMatch) parsedHours = parseFloat(hourMatch[1]);
+
+            const minMatch = timeStr.match(/([0-9.]+)분/);
+            if (minMatch) parsedMins = parseFloat(minMatch[1]);
+
+            let standardHours = 8;
+            for (const [key, hours] of Object.entries(workingHoursMap)) {
+              if (job.includes(key)) { standardHours = hours; break; }
+            }
+
+            const totalHours = parsedHours + (parsedMins / 60);
+            days = parsedDays + (totalHours / standardHours);
+
+            if (!resultData[name]) resultData[name] = { job: job, totalDays: 0 };
+            resultData[name].totalDays += days;
+          }
+        }
+        resolve(resultData);
+      } catch (err) { reject(err.message); }
+    };
+    reader.onerror = () => reject('파일 읽기 실패');
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function renderVacationTable(resultData) {
+  const tbody = document.getElementById('vacationTableBody');
+  tbody.innerHTML = '';
+  const names = Object.keys(resultData);
+  if (names.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="3" style="color:var(--ink-4);">조건에 일치하는 데이터가 없습니다.</td></tr>';
+  } else {
+    names.forEach(name => {
+      const d = resultData[name];
+      const displayDays = Number(d.totalDays.toFixed(3));
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td style="font-weight:700;">${name}</td><td style="color:var(--ink-3);">${d.job || '-'}</td><td style="color:var(--brand); font-weight:800;">${displayDays} 일</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+  document.getElementById('vacationResultWrap').style.display = 'block';
+}
+
+document.getElementById('vacationCalcBtn').addEventListener('click', async () => {
+  if (!vacationFileInput.files.length) {
+    vacationStatusEl.textContent = '엑셀 파일을 먼저 선택해주세요.';
+    vacationStatusEl.className = 'status-box show error';
+    return;
+  }
+  try {
+    vacationRawResult = await processVacationExcel(vacationFileInput.files[0]);
+    renderVacationTable(vacationRawResult);
+    vacationStatusEl.textContent = `${Object.keys(vacationRawResult).length}명의 방학중 비근무일수가 계산되었습니다. STEP2 계산 시 성명 기준으로 자동 반영됩니다.`;
+    vacationStatusEl.className = 'status-box show success';
+  } catch (err) {
+    vacationStatusEl.textContent = '오류: ' + err;
+    vacationStatusEl.className = 'status-box show error';
+  }
+});
+
+/* =========================================================
+   STEP 2 : 연차유급휴가 계산 (원본 로직 그대로, adjustDays만 인별 자동화)
    ========================================================= */
 const TEMPLATE_FILENAME = '교육공무직원 가용 연차유급휴가 일수 산출내역.xlsx';
 
@@ -207,9 +371,7 @@ const EXCEL_CONFIG = {
     previousCareer: 50
   },
   sourceDataStartRow: 1,
-
   templateUrl: './' + encodeURIComponent(TEMPLATE_FILENAME),
-
   sheets: {
     annual: '연차유급휴가 일수 산출내역',
     calendar: '달력'
@@ -312,6 +474,13 @@ function getTotalAdjustDays() {
   return adjustPeriods.reduce((sum, p) => sum + countWeekdaysInRange(p.start, p.end), 0);
 }
 
+/* 핵심 연동 포인트: 성명별 STEP1 비근무일수 + STEP2 공통 조정기간 합산 */
+function getPersonAdjustDays(name) {
+  const auto = vacationRawResult[name] ? vacationRawResult[name].totalDays : 0;
+  const manual = getTotalAdjustDays();
+  return auto + manual;
+}
+
 function renderPeriodList() {
   if (adjustPeriods.length === 0) {
     periodListEl.innerHTML = '<div class="period-empty">추가된 기간이 없습니다.</div>';
@@ -388,9 +557,6 @@ fileInputEl.addEventListener('change', () => {
   if (fileInputEl.files.length) dropZoneText.textContent = `📄 ${fileInputEl.files[0].name}`;
 });
 
-/* =========================================================
-   1. 날짜 유틸
-   ========================================================= */
 function parseDateValue(value) {
   if (value === null || value === undefined || value === '') return null;
   if (value instanceof Date) return value;
@@ -437,9 +603,6 @@ function getLeaveUsePeriod(year) {
   return `${year}. 3. 1. ~ ${nextYear}. 2. ${lastDay}.`;
 }
 
-/* =========================================================
-   2. 전임경력(연 단위) / 주간근로시간 추출
-   ========================================================= */
 function extractCareerYears(value) {
   if (value === null || value === undefined || value === '') return 0;
   if (typeof value === 'number') return Math.floor(value);
@@ -474,9 +637,6 @@ function mapWorkType(rawWorkType) {
   return WORK_TYPE_MAP[key] || key;
 }
 
-/* =========================================================
-   3. 연차 계산 (참조표 기준 근사식 · 화면 미리보기용)
-   ========================================================= */
 function getBaseLeaveDays(serviceYears) {
   if (serviceYears <= 0) return 15;
   const days = 15 + Math.floor((serviceYears - 1) / 2);
@@ -494,7 +654,8 @@ function roundHalfUnit(value) {
   return Math.floor(value);
 }
 
-function calcAnnualLeave(person, baseDate, manualAdjustDays) {
+/* ▼ 수정된 부분: manualAdjustDays → adjustDays (STEP1 자동 + STEP2 수동 합산값) */
+function calcAnnualLeave(person, baseDate, adjustDays) {
   const hireDate = parseDateValue(person.firstHireDate);
   const { years: serviceYears, totalMonths } = diffYearsMonths(hireDate, baseDate);
 
@@ -505,7 +666,7 @@ function calcAnnualLeave(person, baseDate, manualAdjustDays) {
   const totalBeforeAdjust = Math.min(baseDays + bonusDays, 25);
 
   const standardWorkingDays = (person.jobType || '').includes('호봉제') ? 244 : 243;
-  const appliedWorkingDays = standardWorkingDays - Number(manualAdjustDays || 0);
+  const appliedWorkingDays = standardWorkingDays - Number(adjustDays || 0);
 
   const ratio = appliedWorkingDays / standardWorkingDays;
   const finalDays = roundHalfUnit(totalBeforeAdjust * ratio);
@@ -518,9 +679,6 @@ function calcAnnualLeave(person, baseDate, manualAdjustDays) {
   };
 }
 
-/* =========================================================
-   4. 인사기록 파일 파싱
-   ========================================================= */
 function readWorkbookFromFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -571,15 +729,15 @@ function parsePersonnelRecords(workbook) {
   return persons;
 }
 
-/* =========================================================
-   5. 화면 결과 렌더링
-   ========================================================= */
 function renderResultTable(rows) {
   const tbody = document.getElementById('resultBody');
   tbody.innerHTML = '';
 
   rows.forEach((r, idx) => {
     const tr = document.createElement('tr');
+    const matched = vacationRawResult[r.name] !== undefined;
+    const nonWorkDisplay = matched ? Number(vacationRawResult[r.name].totalDays.toFixed(3)) : 0;
+
     tr.innerHTML = `
       <td>${idx + 1}</td>
       <td>${r.name}</td>
@@ -589,7 +747,8 @@ function renderResultTable(rows) {
       <td>${r.previousCareerText}</td>
       <td>${r.weeklyHoursText}</td>
       <td>${r.serviceLabel}</td>
-      <td>${r.appliedWorkingDays}</td>
+      <td class="${matched ? 'badge-ok' : 'badge-warn'}">${matched ? nonWorkDisplay + '일' : '미매칭(0)'}</td>
+      <td style="font-weight:800; color:var(--brand-ink);">${r.appliedWorkingDays}</td>
       <td>${r.baseDays}</td>
       <td>${r.finalDays}</td>
     `;
@@ -601,9 +760,6 @@ function renderResultTable(rows) {
   resultWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-/* =========================================================
-   6. "연차유급휴가 계산" 버튼
-   ========================================================= */
 document.getElementById('parseBtn').addEventListener('click', async () => {
   if (!fileInputEl.files || fileInputEl.files.length === 0) {
     setStatus('먼저 인사기록(엑셀) 파일을 업로드해 주세요.', 'error');
@@ -613,7 +769,6 @@ document.getElementById('parseBtn').addEventListener('click', async () => {
   const year = Number(yearInput.value);
   const month = Number(monthInput.value);
   const day = Number(dayInput.value);
-  const manualAdjustDays = getTotalAdjustDays();
 
   if (!Number.isInteger(year) || year < 1900) {
     setStatus('산정 기준 연도를 올바르게 입력해 주세요.', 'error');
@@ -644,7 +799,8 @@ document.getElementById('parseBtn').addEventListener('click', async () => {
     }
 
     calculatedRows = persons.map((p) => {
-      const calc = calcAnnualLeave(p, baseDate, manualAdjustDays);
+      const personAdjustDays = getPersonAdjustDays(p.name); // STEP1 자동 + STEP2 수동 합산
+      const calc = calcAnnualLeave(p, baseDate, personAdjustDays);
       const hireDate = parseDateValue(p.firstHireDate);
       const weeklyHours = extractWeeklyHours(p.weeklyHours);
 
@@ -658,7 +814,8 @@ document.getElementById('parseBtn').addEventListener('click', async () => {
     });
 
     renderResultTable(calculatedRows);
-    setStatus(`총 ${calculatedRows.length}명의 연차유급휴가 계산이 완료되었습니다.`, 'success');
+    const matchedCount = calculatedRows.filter(r => vacationRawResult[r.name] !== undefined).length;
+    setStatus(`총 ${calculatedRows.length}명의 연차유급휴가 계산이 완료되었습니다. (STEP1 비근무일 매칭: ${matchedCount}명)`, 'success');
     downloadBtn.disabled = false;
 
   } catch (err) {
@@ -668,9 +825,6 @@ document.getElementById('parseBtn').addEventListener('click', async () => {
   }
 });
 
-/* =========================================================
-   7. XLSX(zip) 내부 특정 셀만 직접 수정하는 유틸
-   ========================================================= */
 function escapeXml(str) {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -788,9 +942,6 @@ async function ensureGeneralNumberStyle(zip) {
   return newIndex;
 }
 
-/* =========================================================
-   8. "엑셀 다운로드" 버튼 (fetch로 원본 서식을 불러와 zip 직접 패치)
-   ========================================================= */
 downloadBtn.addEventListener('click', async () => {
   const year = Number(yearInput.value);
   const month = Number(monthInput.value);
