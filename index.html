@@ -2,84 +2,189 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>교육공무직원 연차 자동 산출 (인사기록 연동)</title>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>교육공무직원 연차 자동 산출</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
-  body { font-family: "Malgun Gothic", sans-serif; margin: 24px; color: #222; }
-  h1 { font-size: 20px; margin-bottom: 4px; }
-  .desc { color: #666; font-size: 13px; margin-bottom: 20px; }
-  .box { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 16px; background: #fafafa; }
-  label { font-weight: bold; margin-right: 6px; }
-  input[type="number"], input[type="file"] { padding: 4px 6px; margin-right: 6px; }
-  .row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
-  .note { font-size: 12px; color: #888; margin-top: -4px; margin-bottom: 8px; }
-  button {
-    background: #2563eb; color: #fff; border: none; border-radius: 6px;
-    padding: 10px 18px; font-size: 14px; cursor: pointer; margin-right: 8px;
+  :root { --brand:#1d4ed8; --brand-ink:#1e3a8a; --brand-soft:#eef4ff; --brand-line:#c7d7fe; --ink:#111827; --ink-2:#374151; --ink-3:#6b7280; --ink-4:#9aa3af; --line:#e5e7eb; --surface:#fff; --canvas:#f5f7fa; --danger:#ef4444; --danger-soft:#fef2f2; --danger-line:#fecaca; --success:#16a34a; --success-soft:#ecfdf5; --success-line:#bbf7d0; --radius:10px; --radius-lg:14px; }
+  * { box-sizing:border-box; margin:0; padding:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Pretendard",sans-serif; word-break:keep-all; }
+  body { background:var(--canvas); color:var(--ink); padding:40px 16px; display:flex; justify-content:center; }
+  .page-container { width:100%; max-width:900px; }
+  .header-area { text-align:center; margin-bottom:24px; }
+  .header-title-box,.calc-card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-lg); box-shadow:0 1px 2px rgba(16,24,40,.04); }
+  .header-title-box { padding:24px; color:var(--brand-ink); }
+  .header-title-box h1 { font-size:1.6rem; font-weight:800; }
+  .header-title-box p { margin-top:6px; font-size:.9rem; color:var(--ink-3); font-weight:500; }
+  .calc-card { padding:35px 40px; margin-bottom:24px; }
+  .card-title { text-align:center; font-size:1.3rem; font-weight:800; margin-bottom:28px; }
+  .form-group { margin-bottom:20px; }
+  .form-label { display:block; font-size:.95rem; font-weight:700; margin-bottom:9px; color:var(--ink-2); }
+  .label-sub { font-size:.8rem; font-weight:600; color:var(--ink-3); line-height:1.5; margin-top:6px; }
+  .form-input,.form-select { width:100%; height:48px; padding:0 14px; font-size:1rem; background:var(--canvas); border:1px solid var(--line); border-radius:8px; outline:none; color:var(--ink); font-weight:500; }
+  .form-input:focus,.form-select:focus { background:#fff; border-color:var(--brand); box-shadow:0 0 0 3px rgba(29,78,216,.12); }
+  .flex-row { display:flex; gap:10px; align-items:flex-start; }
+  .flex-1 { flex:1; }
+  .input-with-unit { display:flex; align-items:center; height:48px; }
+  .input-with-unit .form-input { border-radius:8px 0 0 8px; font-weight:600; text-align:right; height:48px; }
+  .unit-box { height:48px; display:flex; align-items:center; background:var(--canvas); border:1px solid var(--line); border-left:0; border-radius:0 8px 8px 0; padding:0 14px; font-weight:600; color:var(--ink-3); white-space:nowrap; }
+
+  /* 산정 기준일: 비율 고정 grid + 버튼 높이 정렬 */
+  .date-input-group { display:grid; grid-template-columns:2fr 1fr 1fr 48px; gap:8px; align-items:center; }
+  .calendar-btn { width:48px; height:48px; background:var(--brand-soft); border:1px solid var(--brand-line); border-radius:8px; font-size:1.2rem; cursor:pointer; color:var(--brand-ink); display:flex; align-items:center; justify-content:center; }
+  .calendar-btn:hover { background:var(--brand-line); }
+  .hidden-date-picker { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+
+  .period-box { border:1px solid var(--line); border-radius:10px; padding:16px; background:var(--canvas); }
+  .period-row { display:flex; align-items:center; gap:8px; background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:10px; }
+  .period-row:last-child { margin-bottom:0; }
+  .period-row .form-input { height:40px; padding:0 10px; font-size:.92rem; }
+  .period-tilde { color:var(--ink-3); font-weight:700; flex-shrink:0; }
+  .period-empty { text-align:center; color:var(--ink-4); font-size:.9rem; font-weight:600; padding:14px 0; }
+  .period-btn-row { display:flex; gap:8px; margin-top:12px; }
+  .btn-add-period { flex:1; background:var(--brand-soft); border:1px solid var(--brand-line); color:var(--brand-ink); font-weight:700; padding:10px; border-radius:8px; cursor:pointer; font-size:.92rem; }
+  .btn-add-period:hover { background:var(--brand-line); }
+  .btn-reset-period { flex:1; background:#fff; border:1px solid var(--line); color:var(--ink-2); font-weight:700; padding:10px; border-radius:8px; cursor:pointer; font-size:.92rem; }
+  .btn-reset-period:hover { background:var(--canvas); }
+  .btn-remove-row { flex-shrink:0; width:34px; height:34px; background:var(--danger-soft); border:1px solid var(--danger-line); color:var(--danger); border-radius:8px; cursor:pointer; font-weight:700; }
+  .btn-remove-row:hover { background:#fee2e2; }
+  .period-total { margin-top:10px; font-size:.85rem; font-weight:700; color:var(--brand-ink); text-align:right; }
+
+  .guide-box { background:var(--canvas); border:1px solid var(--line); border-radius:12px; padding:22px; margin-bottom:24px; }
+  .guide-box h3 { font-size:1.05rem; color:var(--brand-ink); margin-bottom:10px; }
+  .guide-box ol { padding-left:22px; font-size:.93rem; line-height:1.9; color:var(--ink-2); }
+  .guide-box ol li strong { color:var(--brand-ink); }
+
+  .drop-zone { width:100%; padding:45px 20px; text-align:center; background:#fff; border:2px dashed var(--ink-4); border-radius:12px; color:var(--ink-3); cursor:pointer; }
+  .drop-zone:hover { border-color:var(--brand); background:var(--brand-soft); color:var(--brand-ink); }
+  .drop-zone p { font-size:1.02rem; font-weight:700; margin-bottom:8px; }
+  .btn-calc { width:100%; background:var(--brand); color:#fff; font-size:1.1rem; font-weight:800; padding:16px; border:0; border-radius:var(--radius); cursor:pointer; margin-top:10px; }
+  .btn-calc:hover { background:var(--brand-ink); }
+  .btn-calc:disabled { background:var(--ink-4); cursor:not-allowed; }
+  .btn-download { width:100%; background:var(--success-soft); border:1px solid var(--success-line); color:var(--success); padding:16px; border-radius:var(--radius); font-size:1.02rem; font-weight:800; cursor:pointer; margin-top:14px; }
+  .btn-download:hover { background:#dcfce7; }
+  .btn-download:disabled { background:var(--canvas); border-color:var(--line); color:var(--ink-4); cursor:not-allowed; }
+  .status-box { margin-top:14px; font-size:.9rem; font-weight:600; white-space:pre-line; padding:14px 16px; border-radius:10px; display:none; }
+  .status-box.show { display:block; }
+  .status-box.error { background:var(--danger-soft); border:1px solid var(--danger-line); color:var(--danger); }
+  .status-box.success { background:var(--success-soft); border:1px solid var(--success-line); color:var(--success); }
+  .result-wrapper { display:none; margin-top:36px; }
+  .result-wrapper.show { display:block; }
+  .table-container { border-radius:10px; overflow:auto; border:1px solid var(--line); }
+  table { width:100%; border-collapse:collapse; text-align:center; font-size:.88rem; white-space:nowrap; }
+  th { background:var(--canvas); color:var(--ink); padding:12px 10px; font-weight:700; border-right:1px solid var(--line); border-bottom:1px solid var(--line); }
+  td { padding:11px 10px; border-bottom:1px solid var(--line); border-right:1px solid var(--line); color:var(--ink); }
+  tr:last-child td { border-bottom:0; }
+  .result-count { font-size:.95rem; font-weight:700; color:var(--brand-ink); margin-bottom:14px; }
+  @media (max-width:640px) {
+    body { padding:18px 10px; }
+    .calc-card { padding:24px 18px; }
+    .flex-row { flex-direction:column; }
+    .period-row { flex-wrap:wrap; }
+    .date-input-group { grid-template-columns:1fr 1fr 1fr; }
+    .calendar-btn { grid-column:1 / -1; width:100%; }
   }
-  button.secondary { background: #16a34a; }
-  button:disabled { background: #9ca3af; cursor: not-allowed; }
-  table { border-collapse: collapse; width: 100%; margin-top: 16px; font-size: 13px; }
-  th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: center; }
-  th { background: #f1f5f9; }
-  #status { margin-top: 10px; font-size: 13px; white-space: pre-line; }
 </style>
 </head>
 <body>
+<div class="page-container">
+  <header class="header-area">
+    <div class="header-title-box">
+      <h1>교육공무직원 연차 자동 산출</h1>
+      <p>인사기록 업로드 → 자동 계산 → 원본 서식 그대로 엑셀 다운로드</p>
+    </div>
+  </header>
 
-<h1>교육공무직원 연차 자동 산출 (인사기록 연동)</h1>
-<div class="desc">인사기록 엑셀을 업로드하면 열을 자동 파싱하여 연차를 계산하고, 원본 서식 파일의 셀 값만 채워 다운로드합니다. (서식·수식은 그대로 보존됩니다.)</div>
+  <main class="calc-card">
+    <h2 class="card-title">연차유급휴가 계산</h2>
 
-<div class="box">
-  <div class="row">
-    <label for="calcYear">산정 기준일</label>
-    <input type="number" id="calcYear" value="2026" style="width:90px">
-    년
-    <label for="calcMonth" style="margin-left:12px;">월</label>
-    <input type="number" id="calcMonth" min="1" max="12" value="3" style="width:60px">
-    <label for="calcDay">일</label>
-    <input type="number" id="calcDay" min="1" max="31" value="1" style="width:60px">
-  </div>
-  <div class="note">※ 이 날짜가 엑셀 서식의 C1(연도), K3(발생일자), X4(전년도)에 자동 반영됩니다.</div>
+    <div class="guide-box">
+      <h3>📌 사용설명서</h3>
+      <ol>
+        <li><strong>교육공무직 인사관리</strong> → <strong>인사기록관리</strong> → <strong>인사기록(엑셀 다운로드)</strong></li>
+        <li><strong>기준일 설정 후 계산</strong> → <strong>확인 후 엑셀 다운로드</strong></li>
+        <li><strong>1년 이상 근로자만 작성하세요.(근로기준법 제60조제2항 미구현)</strong></li>
+      </ol>
+    </div>
 
-  <div class="row">
-    <label for="manualAdjust">소정근로일수 수동 가감(일)</label>
-    <input type="number" id="manualAdjust" value="0" style="width:80px">
-  </div>
-  <div class="note">※ 계산 시 공휴일 및 근로자의 날(5/1)은 자동 휴무 처리됩니다. (학교장 재량휴업일 등 추가 가감이 필요할 때만 입력)</div>
+    <div class="form-group">
+      <label class="form-label">산정 기준일</label>
+      <div class="date-input-group">
+        <div class="input-with-unit">
+          <input type="number" id="calcYear" class="form-input" maxlength="4" placeholder="2026">
+          <span class="unit-box">년</span>
+        </div>
+        <div class="input-with-unit">
+          <input type="number" id="calcMonth" class="form-input" min="1" max="12" value="3" maxlength="2" placeholder="3">
+          <span class="unit-box">월</span>
+        </div>
+        <div class="input-with-unit">
+          <input type="number" id="calcDay" class="form-input" min="1" max="31" value="1" maxlength="2" placeholder="1">
+          <span class="unit-box">일</span>
+        </div>
+        <button type="button" class="calendar-btn" id="calendarBtn" title="달력에서 선택">📅</button>
+        <input type="date" id="calcDatePicker" class="hidden-date-picker" tabindex="-1">
+      </div>
+      <div class="label-sub">※ 연도 4자리를 입력하면 자동으로 월 칸으로 이동합니다. 이 날짜는 엑셀 서식의 C1(연도)·K3(발생일자)·X4(전년도)에 자동 반영됩니다.</div>
+    </div>
 
-  <div class="row">
-    <label for="excelFile">인사기록(엑셀) 업로드</label>
-    <input type="file" id="excelFile" accept=".xlsx,.xls">
-  </div>
+    <div class="form-group">
+      <label class="form-label">기관명 / 학교명</label>
+      <input type="text" id="schoolName" class="form-input" placeholder="예: OO초등학교">
+      <div class="label-sub">※ 입력한 기관명이 인사기록 인원수만큼 엑셀 서식 C6행부터 아래로 자동 입력됩니다.</div>
+    </div>
 
-  <div class="row">
-    <button id="parseBtn" type="button">연차유급휴가 계산</button>
-    <button id="downloadBtn" class="secondary" type="button" disabled>엑셀 다운로드</button>
-  </div>
+    <div class="form-group">
+      <label class="form-label">소정근로일수 조정 기간 (재량휴업일 등)</label>
+      <div class="period-box">
+        <div id="periodList"><div class="period-empty" id="periodEmptyText">추가된 기간이 없습니다.</div></div>
+        <div class="period-btn-row">
+          <button type="button" class="btn-add-period" id="addPeriodBtn">＋ 기간 추가</button>
+          <button type="button" class="btn-reset-period" id="resetPeriodBtn">초기화</button>
+        </div>
+        <div class="period-total" id="periodTotal"></div>
+      </div>
+    </div>
 
-  <div id="status"></div>
+    <div class="form-group">
+      <label class="form-label">인사기록(엑셀) 업로드</label>
+      <div class="drop-zone" id="dropZone" onclick="document.getElementById('excelFile').click()">
+        <p id="dropZoneText">📂 인사기록 엑셀 파일을 이 곳으로 드래그하거나 클릭하여 업로드하세요.</p>
+        <span>지원 형식: .xlsx, .xls</span>
+        <input type="file" id="excelFile" accept=".xlsx,.xls" style="display:none">
+      </div>
+    </div>
+
+    <button type="button" class="btn-calc" id="parseBtn">연차유급휴가 계산</button>
+    <button type="button" class="btn-download" id="downloadBtn" disabled>엑셀 다운로드</button>
+
+    <div class="status-box" id="status"></div>
+
+    <div class="result-wrapper" id="resultWrapper">
+      <div class="result-count" id="resultCount"></div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>순번</th>
+              <th>성명</th>
+              <th>직종</th>
+              <th>근무형태</th>
+              <th>최초채용일</th>
+              <th>전임경력</th>
+              <th>주간근로시간</th>
+              <th>근속기간</th>
+              <th>적용소정근로일수</th>
+              <th>기본발생</th>
+              <th>최종 연차일수</th>
+            </tr>
+          </thead>
+          <tbody id="resultBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
 </div>
-
-<table id="resultTable">
-  <thead>
-    <tr>
-      <th>순번</th>
-      <th>성명 (F)</th>
-      <th>직종 (H)</th>
-      <th>근무형태 (X)</th>
-      <th>최초채용일 (AI)</th>
-      <th>전임경력 (AY)</th>
-      <th>주간근로시간 (AF)</th>
-      <th>근속기간(현경력)</th>
-      <th>적용 소정근로일수</th>
-      <th>기본발생</th>
-      <th>최종 연차일수(단수조정 적용)</th>
-    </tr>
-  </thead>
-  <tbody id="resultBody"></tbody>
-</table>
 
 <script>
 /* =========================================================
@@ -87,7 +192,6 @@
    ========================================================= */
 const TEMPLATE_FILENAME = '교육공무직원 가용 연차유급휴가 일수 산출내역.xlsx';
 
-// 인사기록의 근무형태(X열) 표기 -> 엑셀 서식 G열에 실제로 들어갈 표기
 const WORK_TYPE_MAP = {
   '상시근무자': '상시전일근무자',
   '방학중비근무자': '방학중비근무자'
@@ -95,12 +199,12 @@ const WORK_TYPE_MAP = {
 
 const EXCEL_CONFIG = {
   sourceCols: {
-    name: 5,            // F열: 성명
-    jobType: 7,          // H열: 직종
-    workType: 23,        // X열: 근무형태
-    firstHireDate: 34,   // AI열: 최초채용일
-    weeklyHours: 31,      // AF열: 주간 근로시간(예: 40, 25)
-    previousCareer: 50   // AY열: 전임경력
+    name: 5,
+    jobType: 7,
+    workType: 23,
+    firstHireDate: 34,
+    weeklyHours: 31,
+    previousCareer: 50
   },
   sourceDataStartRow: 1,
 
@@ -111,16 +215,17 @@ const EXCEL_CONFIG = {
     calendar: '달력'
   },
   cells: {
-    inputYear: 'C1',        // 산정 기준 연도 (D1과 동일한 서식 적용)
-    styleReferenceCell: 'D1', // C1 서식을 그대로 복사해올 기준 셀
-    occurrenceDate: 'K3',   // 발생일자 (산정 기준일 그대로)
-    sheet1PrevYear: 'X4',   // 1번째 시트 전년도
+    inputYear: 'C1',
+    styleReferenceCell: 'D1',
+    occurrenceDate: 'K3',
+    sheet1PrevYear: 'X4',
     leavePeriod: 'E2',
-    previousYear: 'B1'      // 달력 시트 전년도
+    previousYear: 'B1'
   },
-  employeeStartRow: 6,      // C6부터 데이터 입력
+  employeeStartRow: 6,
   maxTemplateRows: 200,
   columns: {
+    institution: 'C',
     sequence: 'A',
     jobType: 'D',
     name: 'E',
@@ -133,14 +238,155 @@ const EXCEL_CONFIG = {
 };
 
 let calculatedRows = [];
+let adjustPeriods = [];
+let periodIdSeq = 0;
 
 const statusEl = document.getElementById('status');
 const downloadBtn = document.getElementById('downloadBtn');
+const resultWrapper = document.getElementById('resultWrapper');
+const dropZone = document.getElementById('dropZone');
+const fileInputEl = document.getElementById('excelFile');
+const dropZoneText = document.getElementById('dropZoneText');
 
-function setStatus(msg, isError) {
+const yearInput = document.getElementById('calcYear');
+const monthInput = document.getElementById('calcMonth');
+const dayInput = document.getElementById('calcDay');
+const calendarBtn = document.getElementById('calendarBtn');
+const datePicker = document.getElementById('calcDatePicker');
+
+function setStatus(msg, type) {
   statusEl.textContent = msg || '';
-  statusEl.style.color = isError ? '#b91c1c' : '#16a34a';
+  statusEl.className = 'status-box' + (msg ? ' show' : '') + (type === 'error' ? ' error' : type === 'success' ? ' success' : '');
 }
+
+yearInput.addEventListener('input', () => {
+  if (yearInput.value.length >= 4) { monthInput.focus(); monthInput.select(); }
+});
+monthInput.addEventListener('input', () => {
+  if (monthInput.value.length >= 2) { dayInput.focus(); dayInput.select(); }
+});
+
+function syncDatePickerFromFields() {
+  const y = String(yearInput.value || '').padStart(4, '0');
+  const m = String(monthInput.value || '1').padStart(2, '0');
+  const d = String(dayInput.value || '1').padStart(2, '0');
+  if (yearInput.value && monthInput.value && dayInput.value) {
+    datePicker.value = `${y}-${m}-${d}`;
+  }
+}
+
+calendarBtn.addEventListener('click', () => {
+  syncDatePickerFromFields();
+  if (typeof datePicker.showPicker === 'function') datePicker.showPicker();
+  else { datePicker.focus(); datePicker.click(); }
+});
+
+datePicker.addEventListener('change', () => {
+  if (!datePicker.value) return;
+  const [y, m, d] = datePicker.value.split('-');
+  yearInput.value = Number(y);
+  monthInput.value = Number(m);
+  dayInput.value = Number(d);
+});
+
+const periodListEl = document.getElementById('periodList');
+const periodTotalEl = document.getElementById('periodTotal');
+
+function countWeekdaysInRange(startStr, endStr) {
+  if (!startStr || !endStr) return 0;
+  let start = new Date(startStr);
+  let end = new Date(endStr);
+  if (start > end) { const tmp = start; start = end; end = tmp; }
+
+  let count = 0;
+  const cur = new Date(start);
+  while (cur <= end) {
+    const day = cur.getDay();
+    if (day !== 0 && day !== 6) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+}
+
+function getTotalAdjustDays() {
+  return adjustPeriods.reduce((sum, p) => sum + countWeekdaysInRange(p.start, p.end), 0);
+}
+
+function renderPeriodList() {
+  if (adjustPeriods.length === 0) {
+    periodListEl.innerHTML = '<div class="period-empty">추가된 기간이 없습니다.</div>';
+    periodTotalEl.textContent = '';
+    return;
+  }
+
+  periodListEl.innerHTML = adjustPeriods.map((p) => `
+    <div class="period-row" data-id="${p.id}">
+      <input type="date" class="form-input period-start" value="${p.start || ''}" data-id="${p.id}">
+      <span class="period-tilde">~</span>
+      <input type="date" class="form-input period-end" value="${p.end || ''}" data-id="${p.id}">
+      <button type="button" class="btn-remove-row" data-remove="${p.id}">✕</button>
+    </div>
+  `).join('');
+
+  periodListEl.querySelectorAll('.period-start').forEach((input) => {
+    input.addEventListener('change', (e) => {
+      const id = Number(e.target.dataset.id);
+      const period = adjustPeriods.find((p) => p.id === id);
+      if (period) { period.start = e.target.value; if (!period.end) period.end = e.target.value; }
+      updatePeriodTotal();
+    });
+  });
+  periodListEl.querySelectorAll('.period-end').forEach((input) => {
+    input.addEventListener('change', (e) => {
+      const id = Number(e.target.dataset.id);
+      const period = adjustPeriods.find((p) => p.id === id);
+      if (period) period.end = e.target.value;
+      updatePeriodTotal();
+    });
+  });
+  periodListEl.querySelectorAll('[data-remove]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const id = Number(e.target.dataset.remove);
+      adjustPeriods = adjustPeriods.filter((p) => p.id !== id);
+      renderPeriodList();
+      updatePeriodTotal();
+    });
+  });
+
+  updatePeriodTotal();
+}
+
+function updatePeriodTotal() {
+  const total = getTotalAdjustDays();
+  periodTotalEl.textContent = adjustPeriods.length > 0
+    ? `총 조정일수: 평일 기준 ${total}일 차감`
+    : '';
+}
+
+document.getElementById('addPeriodBtn').addEventListener('click', () => {
+  periodIdSeq += 1;
+  adjustPeriods.push({ id: periodIdSeq, start: '', end: '' });
+  renderPeriodList();
+});
+
+document.getElementById('resetPeriodBtn').addEventListener('click', () => {
+  adjustPeriods = [];
+  renderPeriodList();
+});
+
+dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = 'var(--brand)'; });
+dropZone.addEventListener('dragleave', () => dropZone.style.borderColor = 'var(--ink-4)');
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.style.borderColor = 'var(--ink-4)';
+  if (e.dataTransfer.files.length) {
+    fileInputEl.files = e.dataTransfer.files;
+    dropZoneText.textContent = `📄 ${e.dataTransfer.files[0].name}`;
+  }
+});
+fileInputEl.addEventListener('change', () => {
+  if (fileInputEl.files.length) dropZoneText.textContent = `📄 ${fileInputEl.files[0].name}`;
+});
 
 /* =========================================================
    1. 날짜 유틸
@@ -215,7 +461,6 @@ function extractWeeklyHours(value) {
   return match ? Number(match[1]) : null;
 }
 
-// 주간 근로시간을 일 기준시간으로 환산 (주 5일 기준: 40시간 -> 8시간, 25시간 -> 5시간)
 function getStandardHours(weeklyHoursValue) {
   const weeklyHours = extractWeeklyHours(weeklyHoursValue);
   if (weeklyHours === null) return '';
@@ -249,7 +494,7 @@ function roundHalfUnit(value) {
   return Math.floor(value);
 }
 
-function calcAnnualLeave(person, baseDate, manualAdjust) {
+function calcAnnualLeave(person, baseDate, manualAdjustDays) {
   const hireDate = parseDateValue(person.firstHireDate);
   const { years: serviceYears, totalMonths } = diffYearsMonths(hireDate, baseDate);
 
@@ -260,7 +505,7 @@ function calcAnnualLeave(person, baseDate, manualAdjust) {
   const totalBeforeAdjust = Math.min(baseDays + bonusDays, 25);
 
   const standardWorkingDays = (person.jobType || '').includes('호봉제') ? 244 : 243;
-  const appliedWorkingDays = standardWorkingDays + Number(manualAdjust || 0);
+  const appliedWorkingDays = standardWorkingDays - Number(manualAdjustDays || 0);
 
   const ratio = appliedWorkingDays / standardWorkingDays;
   const finalDays = roundHalfUnit(totalBeforeAdjust * ratio);
@@ -350,38 +595,40 @@ function renderResultTable(rows) {
     `;
     tbody.appendChild(tr);
   });
+
+  document.getElementById('resultCount').textContent = `총 ${rows.length}명 계산 완료`;
+  resultWrapper.classList.add('show');
+  resultWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 /* =========================================================
    6. "연차유급휴가 계산" 버튼
    ========================================================= */
 document.getElementById('parseBtn').addEventListener('click', async () => {
-  const fileInput = document.getElementById('excelFile');
-
-  if (!fileInput.files || fileInput.files.length === 0) {
-    setStatus('먼저 인사기록(엑셀) 파일을 업로드해 주세요.', true);
+  if (!fileInputEl.files || fileInputEl.files.length === 0) {
+    setStatus('먼저 인사기록(엑셀) 파일을 업로드해 주세요.', 'error');
     return;
   }
 
-  const year = Number(document.getElementById('calcYear').value);
-  const month = Number(document.getElementById('calcMonth').value);
-  const day = Number(document.getElementById('calcDay').value);
-  const manualAdjust = Number(document.getElementById('manualAdjust').value || 0);
+  const year = Number(yearInput.value);
+  const month = Number(monthInput.value);
+  const day = Number(dayInput.value);
+  const manualAdjustDays = getTotalAdjustDays();
 
   if (!Number.isInteger(year) || year < 1900) {
-    setStatus('산정 기준 연도를 올바르게 입력해 주세요.', true);
+    setStatus('산정 기준 연도를 올바르게 입력해 주세요.', 'error');
     return;
   }
 
   const baseDate = new Date(year, (month || 1) - 1, day || 1);
 
   try {
-    setStatus('인사기록을 읽는 중입니다...');
-    const workbook = await readWorkbookFromFile(fileInput.files[0]);
+    setStatus('인사기록을 읽는 중입니다...', null);
+    const workbook = await readWorkbookFromFile(fileInputEl.files[0]);
     const persons = parsePersonnelRecords(workbook);
 
     if (persons.length === 0) {
-      setStatus('인사기록에서 유효한 데이터를 찾지 못했습니다. 열 위치(F/H/X/AF/AI/AY)를 확인해 주세요.', true);
+      setStatus('인사기록에서 유효한 데이터를 찾지 못했습니다. 열 위치를 확인해 주세요.', 'error');
       downloadBtn.disabled = true;
       return;
     }
@@ -390,14 +637,14 @@ document.getElementById('parseBtn').addEventListener('click', async () => {
       setStatus(
         `인원(${persons.length}명)이 템플릿 최대 준비 행(${EXCEL_CONFIG.maxTemplateRows}행)보다 많습니다.\n` +
         `엑셀 서식에서 수식이 있는 행을 더 많이 복사해 두거나, EXCEL_CONFIG.maxTemplateRows 값을 늘려주세요.`,
-        true
+        'error'
       );
       downloadBtn.disabled = true;
       return;
     }
 
     calculatedRows = persons.map((p) => {
-      const calc = calcAnnualLeave(p, baseDate, manualAdjust);
+      const calc = calcAnnualLeave(p, baseDate, manualAdjustDays);
       const hireDate = parseDateValue(p.firstHireDate);
       const weeklyHours = extractWeeklyHours(p.weeklyHours);
 
@@ -411,12 +658,12 @@ document.getElementById('parseBtn').addEventListener('click', async () => {
     });
 
     renderResultTable(calculatedRows);
-    setStatus(`총 ${calculatedRows.length}명의 연차유급휴가 계산이 완료되었습니다.`);
+    setStatus(`총 ${calculatedRows.length}명의 연차유급휴가 계산이 완료되었습니다.`, 'success');
     downloadBtn.disabled = false;
 
   } catch (err) {
     console.error(err);
-    setStatus('인사기록 파일을 처리하는 중 오류가 발생했습니다.\n' + err.message, true);
+    setStatus('인사기록 파일을 처리하는 중 오류가 발생했습니다.\n' + err.message, 'error');
     downloadBtn.disabled = true;
   }
 });
@@ -433,7 +680,6 @@ function escapeXml(str) {
     .replace(/'/g, '&apos;');
 }
 
-// 시트 XML에서 특정 셀의 스타일 인덱스(s="N")만 읽어옴 (값은 건드리지 않음)
 function getCellStyleIndex(xml, ref) {
   const cellRegex = new RegExp(`<c r="${ref}"([^>]*?)(?:/>|>[\\s\\S]*?</c>)`);
   const match = xml.match(cellRegex);
@@ -443,7 +689,6 @@ function getCellStyleIndex(xml, ref) {
   return styleMatch ? styleMatch[1] : null;
 }
 
-// forceStyleIndex를 지정하면 기존 s 속성을 무시하고 그 스타일을 강제 적용
 function setCellInSheetXml(xml, ref, value, type, forceStyleIndex) {
   const cellRegex = new RegExp(
     `<c r="${ref}"([^>]*?)(?:/>|>([\\s\\S]*?)</c>)`
@@ -520,7 +765,6 @@ async function buildSheetPathMap(zip) {
   return sheetMap;
 }
 
-// styles.xml의 cellXfs에 "쉼표 없는 일반 숫자" 서식을 새로 추가 (D1 스타일을 못 찾을 때의 예비용)
 async function ensureGeneralNumberStyle(zip) {
   const stylesPath = 'xl/styles.xml';
   let stylesXml = await zip.file(stylesPath).async('string');
@@ -548,18 +792,19 @@ async function ensureGeneralNumberStyle(zip) {
    8. "엑셀 다운로드" 버튼 (fetch로 원본 서식을 불러와 zip 직접 패치)
    ========================================================= */
 downloadBtn.addEventListener('click', async () => {
-  const year = Number(document.getElementById('calcYear').value);
-  const month = Number(document.getElementById('calcMonth').value);
-  const day = Number(document.getElementById('calcDay').value);
+  const year = Number(yearInput.value);
+  const month = Number(monthInput.value);
+  const day = Number(dayInput.value);
   const baseDate = new Date(year, (month || 1) - 1, day || 1);
+  const schoolName = document.getElementById('schoolName').value.trim();
 
   if (!calculatedRows || calculatedRows.length === 0) {
-    setStatus('먼저 인사기록을 업로드하고 연차유급휴가 계산을 실행해 주세요.', true);
+    setStatus('먼저 인사기록을 업로드하고 연차유급휴가 계산을 실행해 주세요.', 'error');
     return;
   }
 
   try {
-    setStatus('엑셀 서식을 불러오는 중입니다...');
+    setStatus('엑셀 서식을 불러오는 중입니다...', null);
 
     const response = await fetch(
       EXCEL_CONFIG.templateUrl + '?v=' + Date.now(),
@@ -594,26 +839,22 @@ downloadBtn.addEventListener('click', async () => {
     let annualXml = await zip.file(annualPath).async('string');
     let calendarXml = await zip.file(calendarPath).async('string');
 
-    // C1은 D1과 동일한 서식을 그대로 복사해서 적용
     let c1StyleIndex = getCellStyleIndex(annualXml, EXCEL_CONFIG.cells.styleReferenceCell);
     if (c1StyleIndex === null) {
-      console.warn(`${EXCEL_CONFIG.cells.styleReferenceCell} 서식을 찾지 못해 예비 숫자서식을 사용합니다.`);
       c1StyleIndex = await ensureGeneralNumberStyle(zip);
-      annualXml = await zip.file(annualPath).async('string'); // styles.xml만 바뀌었으므로 재로드 불필요하지만 안전하게 유지
     }
 
-    // 공통 입력값
     annualXml = setCellInSheetXml(annualXml, EXCEL_CONFIG.cells.inputYear, year, 'n', c1StyleIndex);
     annualXml = setDateCellInSheetXml(annualXml, EXCEL_CONFIG.cells.occurrenceDate, baseDate);
     annualXml = setCellInSheetXml(annualXml, EXCEL_CONFIG.cells.sheet1PrevYear, year - 1, 'n');
     annualXml = setCellInSheetXml(annualXml, EXCEL_CONFIG.cells.leavePeriod, getLeaveUsePeriod(year), 's');
     calendarXml = setCellInSheetXml(calendarXml, EXCEL_CONFIG.cells.previousYear, year - 1, 'n');
 
-    // 직원별 데이터
     calculatedRows.forEach((person, index) => {
       const row = EXCEL_CONFIG.employeeStartRow + index;
       const col = EXCEL_CONFIG.columns;
 
+      annualXml = setCellInSheetXml(annualXml, `${col.institution}${row}`, schoolName, 's');
       annualXml = setCellInSheetXml(annualXml, `${col.sequence}${row}`, index + 1, 'n');
       annualXml = setCellInSheetXml(annualXml, `${col.jobType}${row}`, person.jobType || '', 's');
       annualXml = setCellInSheetXml(annualXml, `${col.name}${row}`, person.name || '', 's');
@@ -641,14 +882,13 @@ downloadBtn.addEventListener('click', async () => {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    setStatus('엑셀 파일이 다운로드되었습니다. (원본 서식·수식 그대로 유지)');
+    setStatus('엑셀 파일이 다운로드되었습니다. (원본 서식·수식 그대로 유지)', 'success');
 
   } catch (err) {
     console.error(err);
-    setStatus('엑셀 다운로드 중 오류가 발생했습니다.\n' + err.message, true);
+    setStatus('엑셀 다운로드 중 오류가 발생했습니다.\n' + err.message, 'error');
   }
 });
 </script>
-
 </body>
 </html>
