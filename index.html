@@ -183,6 +183,8 @@
         <li><strong>1년 이상 근로자만 작성하세요.(근로기준법 제60조제2항 미구현)</strong></li>
         <li><strong>전임경력은 반드시 검토하세요.</strong></li>
         <li>STEP1에서 방학중 비근무일을 먼저 계산하면 소정근로일수에 자동 반영됩니다.</li>
+        <li><strong>인사기록에는 있지만 STEP1 방학중 비근무일 목록에 이름이 없는 인원(상시근로자 등)은 STEP1·STEP2 개별 조정은 적용하지 않습니다.</strong></li>
+        <li><strong>소정근로일수 기준값은 공공데이터 특일 정보 API를 통해 매년 자동 산출됩니다(법정공휴일·대체공휴일·선거일 및 근로자의 날 반영). API 호출이 실패하면 기본값(243/244일)으로 계산됩니다.</strong></li>
         <li>인사기록 G열의 주민번호 앞 6자리를 읽어 생년월일(19YY-MM-DD)을 자동 산출, 엑셀 서식 F열에 반영합니다.</li>
         <li>엑셀 서식은 20번째까지 자동 입력, 다운로드 가능합니다.</li>
       </ol>
@@ -210,6 +212,7 @@
               <th>주간근로시간</th>
               <th>근속기간</th>
               <th>비근무일수(STEP1자동)</th>
+              <th>기준소정근로일수</th>
               <th>적용소정근로일수</th>
               <th>기본발생</th>
               <th>최종 연차일수</th>
@@ -382,6 +385,95 @@ const WORK_TYPE_MAP = {
   '방학중비근무자': '방학중비근무자'
 };
 
+/* =========================================================
+   공휴일(특일 정보) API 연동 - 매년 소정근로일수 기준값 자동 산출
+   ========================================================= */
+const HOLIDAY_API_KEY = 'af847e3bf0d646dba68eca3206ec5b4682252065f8f19c9e704f79aef6431725';
+const HOLIDAY_API_BASE = 'https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo';
+
+let holidayBaseCache = {}; // { year: { base, totalWeekdays, holidayWeekdayCount, laborDayAdjust, holidayDates } }
+
+async function fetchHolidayMonth(year, month) {
+  const mm = String(month).padStart(2, '0');
+  const url = `${HOLIDAY_API_BASE}?serviceKey=${HOLIDAY_API_KEY}&solYear=${year}&solMonth=${mm}&numOfRows=50&_type=json`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`공휴일 API 응답 오류 (${res.status}) ${year}-${mm}`);
+  const data = await res.json();
+
+  const header = data && data.response && data.response.header;
+  if (header && header.resultCode && String(header.resultCode) !== '00') {
+    throw new Error(`공휴일 API 오류(${header.resultCode}): ${header.resultMsg || ''}`);
+  }
+
+  const items = data && data.response && data.response.body && data.response.body.items && data.response.body.items.item;
+  if (!items) return [];
+  const arr = Array.isArray(items) ? items : [items];
+  return arr
+    .filter((it) => String(it.isHoliday).toUpperCase() === 'Y')
+    .map((it) => String(it.locdate));
+}
+
+function countWeekdaysBetweenDates(start, end) {
+  let count = 0;
+  const cur = new Date(start);
+  while (cur <= end) {
+    const dow = cur.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+}
+
+/* 근로자의 날(5월 1일) - 특일 정보 API에는 보통 포함되지 않아 별도 판별.
+   산정연도의 전년도 5월 1일 기준(소정근로일수 산정기간: 전년도 3/1 ~ 해당연도 2월말) */
+function getLaborDayAdjustDays(year) {
+  const laborDay = new Date(year - 1, 4, 1); // 5월은 0-based로 4
+  const dow = laborDay.getDay();
+  return (dow === 0 || dow === 6) ? 0 : 1;
+}
+
+/* 산정연도 기준 "전년도 3/1 ~ 해당연도 2월말" 기간의 소정근로일수 기준값을
+   공휴일 API로 매년 자동 산출 (캐시 사용, 실패 시 호출부에서 폴백 처리) */
+async function getDynamicStandardWorkingDaysBase(year) {
+  if (holidayBaseCache[year]) return holidayBaseCache[year];
+
+  const months = [];
+  for (let m = 3; m <= 12; m++) months.push([year - 1, m]);
+  for (let m = 1; m <= 2; m++) months.push([year, m]);
+
+  const lists = await Promise.all(months.map(([y, m]) => fetchHolidayMonth(y, m)));
+  const holidaySet = new Set(lists.flat());
+
+  const periodStart = new Date(year - 1, 2, 1);
+  const periodEnd = new Date(year, 1, new Date(year, 2, 0).getDate());
+  const totalWeekdays = countWeekdaysBetweenDates(periodStart, periodEnd);
+
+  let holidayWeekdayCount = 0;
+  holidaySet.forEach((dateStr) => {
+    const y = Number(dateStr.slice(0, 4));
+    const m = Number(dateStr.slice(4, 6));
+    const d = Number(dateStr.slice(6, 8));
+    const dow = new Date(y, m - 1, d).getDay();
+    if (dow !== 0 && dow !== 6) holidayWeekdayCount++;
+  });
+
+  const laborDayAdjust = getLaborDayAdjustDays(year);
+  const base = totalWeekdays - holidayWeekdayCount - laborDayAdjust;
+
+  const info = { base, totalWeekdays, holidayWeekdayCount, laborDayAdjust, holidayDates: Array.from(holidaySet).sort() };
+  holidayBaseCache[year] = info;
+  return info;
+}
+
+/* 호봉제는 기존처럼 기준값에 +1일 적용, API 실패 시 기존 고정값(243/244)으로 폴백 */
+function resolveStandardWorkingDays(jobType, dynamicBaseInfo) {
+  const isHobong = (jobType || '').includes('호봉제');
+  if (dynamicBaseInfo && typeof dynamicBaseInfo.base === 'number' && Number.isFinite(dynamicBaseInfo.base)) {
+    return isHobong ? dynamicBaseInfo.base + 1 : dynamicBaseInfo.base;
+  }
+  return isHobong ? 244 : 243;
+}
+
 const EXCEL_CONFIG = {
   sourceCols: {
     name: 5,
@@ -497,7 +589,7 @@ function getTotalAdjustDays() {
   return adjustPeriods.reduce((sum, p) => sum + countWeekdaysInRange(p.start, p.end), 0);
 }
 
-/* 핵심 연동 포인트: 성명별 STEP1 비근무일수 + STEP2 공통 조정기간 합산 */
+/* 핵심 연동 포인트: 성명별 STEP1 비근무일수 + STEP2 공통 조정기간 합산 (매칭된 인원만 호출) */
 function getPersonAdjustDays(name) {
   const auto = vacationRawResult[name] ? vacationRawResult[name].totalDays : 0;
   const manual = getTotalAdjustDays();
@@ -688,8 +780,9 @@ function roundHalfUnit(value) {
   return Math.floor(value);
 }
 
-/* ▼ 수정된 부분: manualAdjustDays → adjustDays (STEP1 자동 + STEP2 수동 합산값) */
-function calcAnnualLeave(person, baseDate, adjustDays) {
+/* ▼ adjustDays: 매칭된 인원만 STEP1 자동 비근무일 + STEP2 수동 조정기간이 전달됨(미매칭은 0).
+   standardWorkingDays: 공휴일 API 기반 동적 기준값(dynamicBaseInfo)이 있으면 그 값을, 없으면 243/244일 폴백. */
+function calcAnnualLeave(person, baseDate, adjustDays, dynamicBaseInfo) {
   const hireDate = parseDateValue(person.firstHireDate);
   const { years: serviceYears, totalMonths } = diffYearsMonths(hireDate, baseDate);
 
@@ -699,7 +792,7 @@ function calcAnnualLeave(person, baseDate, adjustDays) {
   const bonusDays = getPreviousCareerBonus(careerYears);
   const totalBeforeAdjust = Math.min(baseDays + bonusDays, 25);
 
-  const standardWorkingDays = (person.jobType || '').includes('호봉제') ? 244 : 243;
+  const standardWorkingDays = resolveStandardWorkingDays(person.jobType, dynamicBaseInfo);
   const appliedWorkingDays = standardWorkingDays - Number(adjustDays || 0);
 
   const ratio = appliedWorkingDays / standardWorkingDays;
@@ -707,6 +800,7 @@ function calcAnnualLeave(person, baseDate, adjustDays) {
 
   return {
     serviceLabel: `${serviceYears}년 ${totalMonths % 12}월`,
+    standardWorkingDays,
     appliedWorkingDays,
     baseDays: totalBeforeAdjust,
     finalDays
@@ -770,7 +864,7 @@ function renderResultTable(rows) {
 
   rows.forEach((r, idx) => {
     const tr = document.createElement('tr');
-    const matched = vacationRawResult[r.name] !== undefined;
+    const matched = r.matched;
     const nonWorkDisplay = matched ? Number(vacationRawResult[r.name].totalDays.toFixed(3)) : 0;
 
     tr.innerHTML = `
@@ -783,7 +877,8 @@ function renderResultTable(rows) {
       <td>${r.previousCareerText}</td>
       <td>${r.weeklyHoursText}</td>
       <td>${r.serviceLabel}</td>
-      <td class="${matched ? 'badge-ok' : 'badge-warn'}">${matched ? nonWorkDisplay + '일' : '미매칭(0)'}</td>
+      <td class="${matched ? 'badge-ok' : 'badge-warn'}">${matched ? nonWorkDisplay + '일' : '해당없음(그대로)'}</td>
+      <td>${r.standardWorkingDays}</td>
       <td style="font-weight:800; color:var(--brand-ink);">${r.appliedWorkingDays}</td>
       <td>${r.baseDays}</td>
       <td>${r.finalDays}</td>
@@ -834,14 +929,29 @@ document.getElementById('parseBtn').addEventListener('click', async () => {
       return;
     }
 
+    let dynamicBaseInfo = null;
+    let holidayApiFailed = false;
+    try {
+      setStatus('공휴일 정보를 불러오는 중입니다...', null);
+      dynamicBaseInfo = await getDynamicStandardWorkingDaysBase(year);
+    } catch (holidayErr) {
+      console.error(holidayErr);
+      holidayApiFailed = true;
+      dynamicBaseInfo = null;
+    }
+
     calculatedRows = persons.map((p) => {
-      const personAdjustDays = getPersonAdjustDays(p.name); // STEP1 자동 + STEP2 수동 합산
-      const calc = calcAnnualLeave(p, baseDate, personAdjustDays);
+      /* 인사기록에는 있지만 STEP1 방학중 비근무일 목록에 이름이 없는 인원(상시근로자 등)은
+         STEP1 자동값 + STEP2 수동 조정기간을 반영하지 않는다. */
+      const matched = vacationRawResult[p.name] !== undefined;
+      const personAdjustDays = matched ? getPersonAdjustDays(p.name) : 0;
+      const calc = calcAnnualLeave(p, baseDate, personAdjustDays, dynamicBaseInfo);
       const hireDate = parseDateValue(p.firstHireDate);
       const weeklyHours = extractWeeklyHours(p.weeklyHours);
 
       return {
         ...p,
+        matched,
         birthDateText: extractBirthDateFromSSN(p.birthDateRaw), // 주민번호 앞 6자리 → 19YY-MM-DD
         firstHireDateText: hireDate ? hireDate.toISOString().slice(0, 10) : String(p.firstHireDate || ''),
         previousCareerText: String(p.previousCareer || ''),
@@ -851,8 +961,9 @@ document.getElementById('parseBtn').addEventListener('click', async () => {
     });
 
     renderResultTable(calculatedRows);
-    const matchedCount = calculatedRows.filter(r => vacationRawResult[r.name] !== undefined).length;
-    setStatus(`총 ${calculatedRows.length}명의 연차유급휴가 계산이 완료되었습니다. (STEP1 비근무일 매칭: ${matchedCount}명)`, 'success');
+    const matchedCount = calculatedRows.filter(r => r.matched).length;
+    const baseMsg = `총 ${calculatedRows.length}명의 연차유급휴가 계산이 완료되었습니다. (STEP1 비근무일 매칭: ${matchedCount}명 / 소정근로일수 그대로 적용: ${calculatedRows.length - matchedCount}명)`;
+    setStatus(holidayApiFailed ? `${baseMsg}\n(공휴일 API 호출 실패로 기본값 계산)` : baseMsg, 'success');
     downloadBtn.disabled = false;
 
   } catch (err) {
