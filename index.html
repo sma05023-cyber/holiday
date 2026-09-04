@@ -88,7 +88,6 @@
 const TEMPLATE_FILENAME = '교육공무직원 가용 연차유급휴가 일수 산출내역.xlsx';
 
 // 인사기록의 근무형태(X열) 표기 -> 엑셀 서식 G열에 실제로 들어갈 표기
-// 서식에서 요구하는 정확한 문구가 다르면 이 표만 수정하면 됩니다.
 const WORK_TYPE_MAP = {
   '상시근무자': '상시전일근무자',
   '방학중비근무자': '방학중비근무자'
@@ -112,13 +111,14 @@ const EXCEL_CONFIG = {
     calendar: '달력'
   },
   cells: {
-    inputYear: 'C1',       // 산정 기준 연도 (쉼표 없는 일반 숫자서식 강제)
-    occurrenceDate: 'K3',  // 발생일자 (산정 기준일 그대로)
-    sheet1PrevYear: 'X4',  // 1번째 시트 전년도
+    inputYear: 'C1',        // 산정 기준 연도 (D1과 동일한 서식 적용)
+    styleReferenceCell: 'D1', // C1 서식을 그대로 복사해올 기준 셀
+    occurrenceDate: 'K3',   // 발생일자 (산정 기준일 그대로)
+    sheet1PrevYear: 'X4',   // 1번째 시트 전년도
     leavePeriod: 'E2',
-    previousYear: 'B1'     // 달력 시트 전년도
+    previousYear: 'B1'      // 달력 시트 전년도
   },
-  employeeStartRow: 6,     // C6부터 데이터 입력
+  employeeStartRow: 6,      // C6부터 데이터 입력
   maxTemplateRows: 200,
   columns: {
     sequence: 'A',
@@ -221,7 +221,6 @@ function getStandardHours(weeklyHoursValue) {
   if (weeklyHours === null) return '';
 
   const dailyHours = weeklyHours / 5;
-  // 소수점 첫째 자리까지만 (예: 6.25 -> 6.3 등 원치 않으면 이 줄 조정)
   return Math.round(dailyHours * 10) / 10;
 }
 
@@ -434,7 +433,17 @@ function escapeXml(str) {
     .replace(/'/g, '&apos;');
 }
 
-// forceStyleIndex를 지정하면 기존 s 속성을 무시하고 그 스타일을 강제 적용 (예: 쉼표 없는 숫자서식)
+// 시트 XML에서 특정 셀의 스타일 인덱스(s="N")만 읽어옴 (값은 건드리지 않음)
+function getCellStyleIndex(xml, ref) {
+  const cellRegex = new RegExp(`<c r="${ref}"([^>]*?)(?:/>|>[\\s\\S]*?</c>)`);
+  const match = xml.match(cellRegex);
+  if (!match) return null;
+
+  const styleMatch = (match[1] || '').match(/\ss="(\d+)"/);
+  return styleMatch ? styleMatch[1] : null;
+}
+
+// forceStyleIndex를 지정하면 기존 s 속성을 무시하고 그 스타일을 강제 적용
 function setCellInSheetXml(xml, ref, value, type, forceStyleIndex) {
   const cellRegex = new RegExp(
     `<c r="${ref}"([^>]*?)(?:/>|>([\\s\\S]*?)</c>)`
@@ -511,21 +520,20 @@ async function buildSheetPathMap(zip) {
   return sheetMap;
 }
 
-// styles.xml의 cellXfs에 "쉼표 없는 일반 숫자" 서식을 새로 추가하고 그 인덱스를 반환
+// styles.xml의 cellXfs에 "쉼표 없는 일반 숫자" 서식을 새로 추가 (D1 스타일을 못 찾을 때의 예비용)
 async function ensureGeneralNumberStyle(zip) {
   const stylesPath = 'xl/styles.xml';
   let stylesXml = await zip.file(stylesPath).async('string');
 
   const cellXfsMatch = stylesXml.match(/<cellXfs count="(\d+)">([\s\S]*?)<\/cellXfs>/);
   if (!cellXfsMatch) {
-    console.warn('styles.xml에서 cellXfs를 찾지 못해 C1 서식 강제 적용을 건너뜁니다.');
+    console.warn('styles.xml에서 cellXfs를 찾지 못해 예비 서식 적용을 건너뜁니다.');
     return null;
   }
 
   const currentCount = parseInt(cellXfsMatch[1], 10);
   const newIndex = currentCount;
 
-  // numFmtId="1" = 내장 서식 "0" (정수, 천 단위 구분기호 없음)
   const newXf = '<xf numFmtId="1" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>';
   const newBlock = cellXfsMatch[2] + newXf;
   const newCellXfs = `<cellXfs count="${currentCount + 1}">${newBlock}</cellXfs>`;
@@ -583,14 +591,19 @@ downloadBtn.addEventListener('click', async () => {
     if (!annualPath) throw new Error(`'${EXCEL_CONFIG.sheets.annual}' 시트를 찾을 수 없습니다.`);
     if (!calendarPath) throw new Error(`'${EXCEL_CONFIG.sheets.calendar}' 시트를 찾을 수 없습니다.`);
 
-    // C1 전용 "쉼표 없는 숫자" 서식 준비
-    const generalStyleIndex = await ensureGeneralNumberStyle(zip);
-
     let annualXml = await zip.file(annualPath).async('string');
     let calendarXml = await zip.file(calendarPath).async('string');
 
+    // C1은 D1과 동일한 서식을 그대로 복사해서 적용
+    let c1StyleIndex = getCellStyleIndex(annualXml, EXCEL_CONFIG.cells.styleReferenceCell);
+    if (c1StyleIndex === null) {
+      console.warn(`${EXCEL_CONFIG.cells.styleReferenceCell} 서식을 찾지 못해 예비 숫자서식을 사용합니다.`);
+      c1StyleIndex = await ensureGeneralNumberStyle(zip);
+      annualXml = await zip.file(annualPath).async('string'); // styles.xml만 바뀌었으므로 재로드 불필요하지만 안전하게 유지
+    }
+
     // 공통 입력값
-    annualXml = setCellInSheetXml(annualXml, EXCEL_CONFIG.cells.inputYear, year, 'n', generalStyleIndex);
+    annualXml = setCellInSheetXml(annualXml, EXCEL_CONFIG.cells.inputYear, year, 'n', c1StyleIndex);
     annualXml = setDateCellInSheetXml(annualXml, EXCEL_CONFIG.cells.occurrenceDate, baseDate);
     annualXml = setCellInSheetXml(annualXml, EXCEL_CONFIG.cells.sheet1PrevYear, year - 1, 'n');
     annualXml = setCellInSheetXml(annualXml, EXCEL_CONFIG.cells.leavePeriod, getLeaveUsePeriod(year), 's');
@@ -609,7 +622,6 @@ downloadBtn.addEventListener('click', async () => {
       annualXml = setDateCellInSheetXml(annualXml, `${col.firstHireDate}${row}`, person.firstHireDate);
       annualXml = setCellInSheetXml(annualXml, `${col.previousCareerYears}${row}`, extractCareerYears(person.previousCareer), 'n');
       annualXml = setCellInSheetXml(annualXml, `${col.standardHours}${row}`, getStandardHours(person.weeklyHours), 'n');
-      // 출근의무일수 등 계산식이 걸린 열은 채우지 않음 (서식 자체 수식이 계산)
     });
 
     zip.file(annualPath, annualXml);
