@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>교육공무직원 연차 자동 산출 (인사기록 연동 · 서식 보존 다운로드)</title>
+<title>교육공무직원 연차 자동 산출 (인사기록 연동)</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
@@ -29,7 +29,7 @@
 <body>
 
 <h1>교육공무직원 연차 자동 산출 (인사기록 연동)</h1>
-<div class="desc">인사기록 엑셀을 업로드하면 열을 자동 파싱하여 연차를 계산하고, 원본 서식 파일의 셀 값만 수정하여 다운로드합니다. (서식·수식·조건부서식은 그대로 보존됩니다.)</div>
+<div class="desc">인사기록 엑셀을 업로드하면 열을 자동 파싱하여 연차를 계산하고, 원본 서식 파일의 셀 값만 채워 다운로드합니다. (서식·수식은 그대로 보존됩니다.)</div>
 
 <div class="box">
   <div class="row">
@@ -84,6 +84,8 @@
 /* =========================================================
    0. 공통 설정
    ========================================================= */
+const TEMPLATE_FILENAME = '교육공무직원 가용 연차유급휴가 일수 산출내역.xlsx';
+
 const EXCEL_CONFIG = {
   sourceCols: {
     name: 5,            // F열: 성명
@@ -92,10 +94,10 @@ const EXCEL_CONFIG = {
     firstHireDate: 34,   // AI열: 최초채용일
     previousCareer: 50   // AY열: 전임경력
   },
-  sourceDataStartRow: 1, // 인사기록 파일 헤더가 1행이면 데이터는 인덱스 1부터
+  sourceDataStartRow: 1,
 
-  // 이 HTML과 같은 폴더에 위치해야 하는 실제 원본 서식(.xlsx)
-  templateUrl: './gyoyuggongmujigweon-gayong-yeoncayugeubhyuga-ilsu-sanculnaeyeog.xlsx',
+  // 한글/공백이 포함된 파일명은 반드시 encodeURIComponent로 인코딩해서 요청해야 함
+  templateUrl: './' + encodeURIComponent(TEMPLATE_FILENAME),
 
   sheets: {
     annual: '연차유급휴가 일수 산출내역',
@@ -108,7 +110,6 @@ const EXCEL_CONFIG = {
   },
   // 서식에서 순번 "1"이 실제로 있는 행 번호로 반드시 확인 후 수정하세요.
   employeeStartRow: 8,
-  // 템플릿에 미리 서식/수식이 복사되어 있는 최대 행 수 (이 이상은 채우지 않음)
   maxTemplateRows: 200,
   columns: {
     sequence: 'A',
@@ -157,7 +158,6 @@ function parseDateValue(value) {
 }
 
 function dateToExcelSerial(date) {
-  // Excel 1900 날짜 시스템(윤년 버그 포함) 기준 시리얼 값
   const utcDate = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
   const excelEpoch = Date.UTC(1899, 11, 30);
   return Math.round((utcDate - excelEpoch) / 86400000);
@@ -397,8 +397,6 @@ function escapeXml(str) {
     .replace(/'/g, '&apos;');
 }
 
-// 시트XML 텍스트 안에서 특정 셀 ref(예: "C1")의 값만 교체.
-// 기존 스타일(s 속성)은 그대로 유지하고, 값/타입만 바꾼다.
 function setCellInSheetXml(xml, ref, value, type) {
   const cellRegex = new RegExp(
     `<c r="${ref}"([^>]*?)(?:/>|>([\\s\\S]*?)</c>)`
@@ -424,7 +422,6 @@ function setCellInSheetXml(xml, ref, value, type) {
       newCellXml = `<c r="${ref}"${styleAttr}><v>${numValue}</v></c>`;
     }
   } else {
-    // 문자열: 공유문자열 테이블을 건드리지 않기 위해 inlineStr 사용
     const text = escapeXml(value === null || value === undefined ? '' : String(value));
     if (text === '') {
       newCellXml = `<c r="${ref}"${styleAttr}/>`;
@@ -444,7 +441,6 @@ function setDateCellInSheetXml(xml, ref, dateValue) {
   return setCellInSheetXml(xml, ref, dateToExcelSerial(date), 'n');
 }
 
-// workbook.xml + workbook.xml.rels에서 시트 이름 -> 실제 워크시트 XML 경로 매핑
 async function buildSheetPathMap(zip) {
   const workbookXml = await zip.file('xl/workbook.xml').async('string');
   const relsXml = await zip.file('xl/_rels/workbook.xml.rels').async('string');
@@ -490,7 +486,7 @@ function getStandardHours(jobType, workType) {
 }
 
 /* =========================================================
-   8. "엑셀 다운로드" 버튼 (zip 직접 패치 방식)
+   8. "엑셀 다운로드" 버튼 (fetch로 원본 서식을 불러와 zip 직접 패치)
    ========================================================= */
 downloadBtn.addEventListener('click', async () => {
   const year = Number(document.getElementById('calcYear').value);
@@ -505,7 +501,18 @@ downloadBtn.addEventListener('click', async () => {
 
     const response = await fetch(EXCEL_CONFIG.templateUrl);
     if (!response.ok) {
-      throw new Error(`엑셀 서식 파일을 불러오지 못했습니다. (${response.status}) 경로: ${EXCEL_CONFIG.templateUrl}`);
+      throw new Error(
+        `엑셀 서식 파일을 불러오지 못했습니다. (${response.status}) 경로: ${EXCEL_CONFIG.templateUrl}\n` +
+        `파일명이 "${TEMPLATE_FILENAME}" 그대로 저장소에 있는지 확인해 주세요.`
+      );
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('text/html')) {
+      throw new Error(
+        '서식 파일 대신 HTML 페이지가 반환되었습니다. 파일 경로/파일명이 실제 저장소와 다를 수 있습니다.\n' +
+        `요청 경로: ${EXCEL_CONFIG.templateUrl}`
+      );
     }
 
     const arrayBuffer = await response.arrayBuffer();
@@ -521,12 +528,10 @@ downloadBtn.addEventListener('click', async () => {
     let annualXml = await zip.file(annualPath).async('string');
     let calendarXml = await zip.file(calendarPath).async('string');
 
-    // 공통 입력값
     annualXml = setCellInSheetXml(annualXml, EXCEL_CONFIG.cells.inputYear, year, 'n');
     annualXml = setCellInSheetXml(annualXml, EXCEL_CONFIG.cells.leavePeriod, getLeaveUsePeriod(year), 's');
     calendarXml = setCellInSheetXml(calendarXml, EXCEL_CONFIG.cells.previousYear, year - 1, 'n');
 
-    // 직원별 데이터 (템플릿에 이미 서식/수식이 준비된 행에만 기록)
     calculatedRows.forEach((person, index) => {
       const row = EXCEL_CONFIG.employeeStartRow + index;
       const col = EXCEL_CONFIG.columns;
