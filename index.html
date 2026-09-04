@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>교육공무직원 연차 자동 산출 (인사기록 연동 · 서식 보존 다운로드)</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<style>
+  body { font-family: "Malgun Gothic", sans-serif; margin: 24px; color: #222; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .desc { color: #666; font-size: 13px; margin-bottom: 20px; }
+  .box { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 16px; background: #fafafa; }
+  label { font-weight: bold; margin-right: 6px; }
+  input[type="number"], input[type="file"] { padding: 4px 6px; margin-right: 6px; }
+  .row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .note { font-size: 12px; color: #888; margin-top: -4px; margin-bottom: 8px; }
+  button {
+    background: #2563eb; color: #fff; border: none; border-radius: 6px;
+    padding: 10px 18px; font-size: 14px; cursor: pointer; margin-right: 8px;
+  }
+  button.secondary { background: #16a34a; }
+  button:disabled { background: #9ca3af; cursor: not-allowed; }
+  table { border-collapse: collapse; width: 100%; margin-top: 16px; font-size: 13px; }
+  th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: center; }
+  th { background: #f1f5f9; }
+  #status { margin-top: 10px; font-size: 13px; white-space: pre-line; }
+</style>
+</head>
+<body>
+
+<h1>교육공무직원 연차 자동 산출 (인사기록 연동)</h1>
+<div class="desc">인사기록 엑셀을 업로드하면 열을 자동 파싱하여 연차를 계산하고, 원본 서식 파일의 셀 값만 수정하여 다운로드합니다. (서식·수식·조건부서식은 그대로 보존됩니다.)</div>
+
+<div class="box">
+  <div class="row">
+    <label for="calcYear">산정 기준 연도</label>
+    <input type="number" id="calcYear" value="2026" style="width:90px">
+    년
+    <label for="calcMonth" style="margin-left:12px;">월</label>
+    <input type="number" id="calcMonth" min="1" max="12" value="3" style="width:60px">
+    <label for="calcDay">일</label>
+    <input type="number" id="calcDay" min="1" max="31" value="1" style="width:60px">
+  </div>
+  <div class="note">※ 연도 입력 시 연차유급휴가 사용기간(해당 연도 3/1 ~ 다음 연도 2월 말일)이 자동 설정됩니다.</div>
+
+  <div class="row">
+    <label for="manualAdjust">소정근로일수 수동 가감(일)</label>
+    <input type="number" id="manualAdjust" value="0" style="width:80px">
+  </div>
+  <div class="note">※ 계산 시 공휴일 및 근로자의 날(5/1)은 자동 휴무 처리됩니다. (학교장 재량휴업일 등 추가 가감이 필요할 때만 입력)</div>
+
+  <div class="row">
+    <label for="excelFile">인사기록(엑셀) 업로드</label>
+    <input type="file" id="excelFile" accept=".xlsx,.xls">
+  </div>
+
+  <div class="row">
+    <button id="parseBtn" type="button">연차유급휴가 계산</button>
+    <button id="downloadBtn" class="secondary" type="button" disabled>엑셀 다운로드</button>
+  </div>
+
+  <div id="status"></div>
+</div>
+
+<table id="resultTable">
+  <thead>
+    <tr>
+      <th>순번</th>
+      <th>성명 (F)</th>
+      <th>직종 (H)</th>
+      <th>근무형태 (X)</th>
+      <th>최초채용일 (AI)</th>
+      <th>전임경력 (AY)</th>
+      <th>근속기간(현경력)</th>
+      <th>적용 소정근로일수</th>
+      <th>기본발생</th>
+      <th>최종 연차일수(단수조정 적용)</th>
+    </tr>
+  </thead>
+  <tbody id="resultBody"></tbody>
+</table>
+
+<script>
+/* =========================================================
+   0. 공통 설정
+   ========================================================= */
+const EXCEL_CONFIG = {
+  sourceCols: {
+    name: 5,            // F열: 성명
+    jobType: 7,          // H열: 직종
+    workType: 23,        // X열: 근무형태
+    firstHireDate: 34,   // AI열: 최초채용일
+    previousCareer: 50   // AY열: 전임경력
+  },
+  sourceDataStartRow: 1, // 인사기록 파일 헤더가 1행이면 데이터는 인덱스 1부터
+
+  // 이 HTML과 같은 폴더에 위치해야 하는 실제 원본 서식(.xlsx)
+  templateUrl: './gyoyuggongmujigweon-gayong-yeoncayugeubhyuga-ilsu-sanculnaeyeog.xlsx',
+
+  sheets: {
+    annual: '연차유급휴가 일수 산출내역',
+    calendar: '달력'
+  },
+  cells: {
+    inputYear: 'C1',
+    leavePeriod: 'E2',
+    previousYear: 'B1'
+  },
+  // 서식에서 순번 "1"이 실제로 있는 행 번호로 반드시 확인 후 수정하세요.
+  employeeStartRow: 8,
+  // 템플릿에 미리 서식/수식이 복사되어 있는 최대 행 수 (이 이상은 채우지 않음)
+  maxTemplateRows: 200,
+  columns: {
+    sequence: 'A',
+    jobType: 'D',
+    name: 'E',
+    birthDate: 'F',
+    workType: 'G',
+    firstHireDate: 'H',
+    previousCareerYears: 'P',
+    standardHours: 'V'
+  }
+};
+
+let calculatedRows = [];
+
+const statusEl = document.getElementById('status');
+const downloadBtn = document.getElementById('downloadBtn');
+
+function setStatus(msg, isError) {
+  statusEl.textContent = msg || '';
+  statusEl.style.color = isError ? '#b91c1c' : '#16a34a';
+}
+
+/* =========================================================
+   1. 날짜 유틸
+   ========================================================= */
+function parseDateValue(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (value instanceof Date) return value;
+
+  if (typeof value === 'number') {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (parsed) return new Date(parsed.y, parsed.m - 1, parsed.d);
+    return null;
+  }
+
+  const text = String(value).trim().replace(/[./]/g, '-').replace(/\s+/g, '');
+
+  let m = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+
+  m = text.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+
+  return null;
+}
+
+function dateToExcelSerial(date) {
+  // Excel 1900 날짜 시스템(윤년 버그 포함) 기준 시리얼 값
+  const utcDate = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  const excelEpoch = Date.UTC(1899, 11, 30);
+  return Math.round((utcDate - excelEpoch) / 86400000);
+}
+
+function diffYearsMonths(startDate, endDate) {
+  if (!startDate || !endDate) return { years: 0, months: 0, totalMonths: 0 };
+
+  let years = endDate.getFullYear() - startDate.getFullYear();
+  let months = endDate.getMonth() - startDate.getMonth();
+
+  if (endDate.getDate() < startDate.getDate()) months -= 1;
+  if (months < 0) { years -= 1; months += 12; }
+  if (years < 0) { years = 0; months = 0; }
+
+  return { years, months, totalMonths: years * 12 + months };
+}
+
+function getLeaveUsePeriod(year) {
+  const nextYear = year + 1;
+  const lastDay = new Date(nextYear, 2, 0).getDate();
+  return `${year}. 3. 1. ~ ${nextYear}. 2. ${lastDay}.`;
+}
+
+/* =========================================================
+   2. 전임경력(연 단위) 추출
+   ========================================================= */
+function extractCareerYears(value) {
+  if (value === null || value === undefined || value === '') return 0;
+  if (typeof value === 'number') return Math.floor(value);
+
+  const text = String(value).trim();
+  const yearMatch = text.match(/(\d+)\s*년/);
+  if (yearMatch) return Number(yearMatch[1]);
+
+  const numberMatch = text.match(/(\d+(\.\d+)?)/);
+  return numberMatch ? Math.floor(Number(numberMatch[1])) : 0;
+}
+
+/* =========================================================
+   3. 연차 계산 (참조표 기준 근사식 · 화면 미리보기용)
+   ========================================================= */
+function getBaseLeaveDays(serviceYears) {
+  if (serviceYears <= 0) return 15;
+  const days = 15 + Math.floor((serviceYears - 1) / 2);
+  return Math.min(days, 25);
+}
+
+function getPreviousCareerBonus(careerYears) {
+  return Math.floor(careerYears / 2);
+}
+
+function roundHalfUnit(value) {
+  const frac = value - Math.floor(value);
+  if (frac >= 0.6) return Math.floor(value) + 1;
+  if (frac >= 0.1) return Math.floor(value) + 0.5;
+  return Math.floor(value);
+}
+
+function calcAnnualLeave(person, baseDate, manualAdjust) {
+  const hireDate = parseDateValue(person.firstHireDate);
+  const { years: serviceYears, totalMonths } = diffYearsMonths(hireDate, baseDate);
+
+  const careerYears = extractCareerYears(person.previousCareer);
+
+  const baseDays = getBaseLeaveDays(serviceYears);
+  const bonusDays = getPreviousCareerBonus(careerYears);
+  const totalBeforeAdjust = Math.min(baseDays + bonusDays, 25);
+
+  const standardWorkingDays = (person.jobType || '').includes('호봉제') ? 244 : 243;
+  const appliedWorkingDays = standardWorkingDays + Number(manualAdjust || 0);
+
+  const ratio = appliedWorkingDays / standardWorkingDays;
+  const finalDays = roundHalfUnit(totalBeforeAdjust * ratio);
+
+  return {
+    serviceLabel: `${serviceYears}년 ${totalMonths % 12}월`,
+    appliedWorkingDays,
+    baseDays: totalBeforeAdjust,
+    finalDays
+  };
+}
+
+/* =========================================================
+   4. 인사기록 파일 파싱
+   ========================================================= */
+function readWorkbookFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+        resolve(workbook);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function parsePersonnelRecords(workbook) {
+  const firstSheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[firstSheetName];
+
+  const rows = XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    raw: false,
+    defval: ''
+  });
+
+  const cols = EXCEL_CONFIG.sourceCols;
+  const persons = [];
+
+  for (let i = EXCEL_CONFIG.sourceDataStartRow; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.length === 0) continue;
+
+    const name = row[cols.name];
+    if (!name || String(name).trim() === '') continue;
+
+    persons.push({
+      name: String(name).trim(),
+      jobType: String(row[cols.jobType] || '').trim(),
+      workType: String(row[cols.workType] || '').trim(),
+      firstHireDate: row[cols.firstHireDate],
+      previousCareer: row[cols.previousCareer]
+    });
+  }
+
+  return persons;
+}
+
+/* =========================================================
+   5. 화면 결과 렌더링
+   ========================================================= */
+function renderResultTable(rows) {
+  const tbody = document.getElementById('resultBody');
+  tbody.innerHTML = '';
+
+  rows.forEach((r, idx) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${idx + 1}</td>
+      <td>${r.name}</td>
+      <td>${r.jobType}</td>
+      <td>${r.workType}</td>
+      <td>${r.firstHireDateText}</td>
+      <td>${r.previousCareerText}</td>
+      <td>${r.serviceLabel}</td>
+      <td>${r.appliedWorkingDays}</td>
+      <td>${r.baseDays}</td>
+      <td>${r.finalDays}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+/* =========================================================
+   6. "연차유급휴가 계산" 버튼
+   ========================================================= */
+document.getElementById('parseBtn').addEventListener('click', async () => {
+  const fileInput = document.getElementById('excelFile');
+
+  if (!fileInput.files || fileInput.files.length === 0) {
+    setStatus('먼저 인사기록(엑셀) 파일을 업로드해 주세요.', true);
+    return;
+  }
+
+  const year = Number(document.getElementById('calcYear').value);
+  const month = Number(document.getElementById('calcMonth').value);
+  const day = Number(document.getElementById('calcDay').value);
+  const manualAdjust = Number(document.getElementById('manualAdjust').value || 0);
+
+  if (!Number.isInteger(year) || year < 1900) {
+    setStatus('산정 기준 연도를 올바르게 입력해 주세요.', true);
+    return;
+  }
+
+  const baseDate = new Date(year, (month || 1) - 1, day || 1);
+
+  try {
+    setStatus('인사기록을 읽는 중입니다...');
+    const workbook = await readWorkbookFromFile(fileInput.files[0]);
+    const persons = parsePersonnelRecords(workbook);
+
+    if (persons.length === 0) {
+      setStatus('인사기록에서 유효한 데이터를 찾지 못했습니다. 열 위치(F/H/X/AI/AY)를 확인해 주세요.', true);
+      downloadBtn.disabled = true;
+      return;
+    }
+
+    if (persons.length > EXCEL_CONFIG.maxTemplateRows) {
+      setStatus(
+        `인원(${persons.length}명)이 템플릿 최대 준비 행(${EXCEL_CONFIG.maxTemplateRows}행)보다 많습니다.\n` +
+        `엑셀 서식에서 수식이 있는 행을 더 많이 복사해 두거나, EXCEL_CONFIG.maxTemplateRows 값을 늘려주세요.`,
+        true
+      );
+      downloadBtn.disabled = true;
+      return;
+    }
+
+    calculatedRows = persons.map((p) => {
+      const calc = calcAnnualLeave(p, baseDate, manualAdjust);
+      const hireDate = parseDateValue(p.firstHireDate);
+
+      return {
+        ...p,
+        firstHireDateText: hireDate ? hireDate.toISOString().slice(0, 10) : String(p.firstHireDate || ''),
+        previousCareerText: String(p.previousCareer || ''),
+        ...calc
+      };
+    });
+
+    renderResultTable(calculatedRows);
+    setStatus(`총 ${calculatedRows.length}명의 연차유급휴가 계산이 완료되었습니다.`);
+    downloadBtn.disabled = false;
+
+  } catch (err) {
+    console.error(err);
+    setStatus('인사기록 파일을 처리하는 중 오류가 발생했습니다.\n' + err.message, true);
+    downloadBtn.disabled = true;
+  }
+});
+
+/* =========================================================
+   7. XLSX(zip) 내부 특정 셀만 직접 수정하는 유틸
+   ========================================================= */
+function escapeXml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+// 시트XML 텍스트 안에서 특정 셀 ref(예: "C1")의 값만 교체.
+// 기존 스타일(s 속성)은 그대로 유지하고, 값/타입만 바꾼다.
+function setCellInSheetXml(xml, ref, value, type) {
+  const cellRegex = new RegExp(
+    `<c r="${ref}"([^>]*?)(?:/>|>([\\s\\S]*?)</c>)`
+  );
+  const match = xml.match(cellRegex);
+
+  if (!match) {
+    console.warn(`셀 ${ref}을 템플릿에서 찾지 못했습니다. (건너뜀)`);
+    return xml;
+  }
+
+  const existingAttrs = match[1] || '';
+  const styleMatch = existingAttrs.match(/\ss="(\d+)"/);
+  const styleAttr = styleMatch ? ` s="${styleMatch[1]}"` : '';
+
+  let newCellXml;
+
+  if (type === 'n') {
+    const numValue = (value === '' || value === null || value === undefined) ? '' : Number(value);
+    if (numValue === '') {
+      newCellXml = `<c r="${ref}"${styleAttr}/>`;
+    } else {
+      newCellXml = `<c r="${ref}"${styleAttr}><v>${numValue}</v></c>`;
+    }
+  } else {
+    // 문자열: 공유문자열 테이블을 건드리지 않기 위해 inlineStr 사용
+    const text = escapeXml(value === null || value === undefined ? '' : String(value));
+    if (text === '') {
+      newCellXml = `<c r="${ref}"${styleAttr}/>`;
+    } else {
+      newCellXml = `<c r="${ref}"${styleAttr} t="inlineStr"><is><t xml:space="preserve">${text}</t></is></c>`;
+    }
+  }
+
+  return xml.slice(0, match.index) + newCellXml + xml.slice(match.index + match[0].length);
+}
+
+function setDateCellInSheetXml(xml, ref, dateValue) {
+  const date = parseDateValue(dateValue);
+  if (!date) {
+    return setCellInSheetXml(xml, ref, dateValue ? String(dateValue) : '', 's');
+  }
+  return setCellInSheetXml(xml, ref, dateToExcelSerial(date), 'n');
+}
+
+// workbook.xml + workbook.xml.rels에서 시트 이름 -> 실제 워크시트 XML 경로 매핑
+async function buildSheetPathMap(zip) {
+  const workbookXml = await zip.file('xl/workbook.xml').async('string');
+  const relsXml = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+
+  const relMap = {};
+  const relRegex = /<Relationship[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"/g;
+  let relMatch;
+  while ((relMatch = relRegex.exec(relsXml)) !== null) {
+    relMap[relMatch[1]] = relMatch[2];
+  }
+
+  const sheetMap = {};
+  const sheetRegex = /<sheet[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"/g;
+  let sheetMatch;
+  while ((sheetMatch = sheetRegex.exec(workbookXml)) !== null) {
+    const name = sheetMatch[1];
+    const rId = sheetMatch[2];
+    const target = relMap[rId];
+    if (target) {
+      sheetMap[name] = target.startsWith('/') ? target.slice(1) : `xl/${target}`;
+    }
+  }
+
+  return sheetMap;
+}
+
+function getStandardHours(jobType, workType) {
+  const type = String(workType || '').replace(/\s/g, '');
+  if (type.includes('방학중비근무')) return '';
+
+  const fullTimeJobs = [
+    '교무행정실무원', '교무행정사', '전산실무원',
+    '행정실무원', '행정실무원(호봉제)', '행정실무원(월급제)',
+    '특수교육실무원', '영양사', '조리사', '조리원',
+    '시설관리원', '과학실험실무원', '교육복지사', '치료사',
+    '전문상담사', '방과후학교운영실무원'
+  ];
+
+  const job = String(jobType || '').replace(/\s/g, '');
+  if (fullTimeJobs.includes(job)) return 8;
+  if (job.includes('돌봄')) return 6;
+  return '';
+}
+
+/* =========================================================
+   8. "엑셀 다운로드" 버튼 (zip 직접 패치 방식)
+   ========================================================= */
+downloadBtn.addEventListener('click', async () => {
+  const year = Number(document.getElementById('calcYear').value);
+
+  if (!calculatedRows || calculatedRows.length === 0) {
+    setStatus('먼저 인사기록을 업로드하고 연차유급휴가 계산을 실행해 주세요.', true);
+    return;
+  }
+
+  try {
+    setStatus('엑셀 서식을 불러오는 중입니다...');
+
+    const response = await fetch(EXCEL_CONFIG.templateUrl);
+    if (!response.ok) {
+      throw new Error(`엑셀 서식 파일을 불러오지 못했습니다. (${response.status}) 경로: ${EXCEL_CONFIG.templateUrl}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const zip = await JSZip.loadAsync(arrayBuffer);
+
+    const sheetPathMap = await buildSheetPathMap(zip);
+    const annualPath = sheetPathMap[EXCEL_CONFIG.sheets.annual];
+    const calendarPath = sheetPathMap[EXCEL_CONFIG.sheets.calendar];
+
+    if (!annualPath) throw new Error(`'${EXCEL_CONFIG.sheets.annual}' 시트를 찾을 수 없습니다.`);
+    if (!calendarPath) throw new Error(`'${EXCEL_CONFIG.sheets.calendar}' 시트를 찾을 수 없습니다.`);
+
+    let annualXml = await zip.file(annualPath).async('string');
+    let calendarXml = await zip.file(calendarPath).async('string');
+
+    // 공통 입력값
+    annualXml = setCellInSheetXml(annualXml, EXCEL_CONFIG.cells.inputYear, year, 'n');
+    annualXml = setCellInSheetXml(annualXml, EXCEL_CONFIG.cells.leavePeriod, getLeaveUsePeriod(year), 's');
+    calendarXml = setCellInSheetXml(calendarXml, EXCEL_CONFIG.cells.previousYear, year - 1, 'n');
+
+    // 직원별 데이터 (템플릿에 이미 서식/수식이 준비된 행에만 기록)
+    calculatedRows.forEach((person, index) => {
+      const row = EXCEL_CONFIG.employeeStartRow + index;
+      const col = EXCEL_CONFIG.columns;
+
+      annualXml = setCellInSheetXml(annualXml, `${col.sequence}${row}`, index + 1, 'n');
+      annualXml = setCellInSheetXml(annualXml, `${col.jobType}${row}`, person.jobType || '', 's');
+      annualXml = setCellInSheetXml(annualXml, `${col.name}${row}`, person.name || '', 's');
+      annualXml = setCellInSheetXml(annualXml, `${col.birthDate}${row}`, person.birthDate || '', 's');
+      annualXml = setCellInSheetXml(annualXml, `${col.workType}${row}`, person.workType || '', 's');
+      annualXml = setDateCellInSheetXml(annualXml, `${col.firstHireDate}${row}`, person.firstHireDate);
+      annualXml = setCellInSheetXml(annualXml, `${col.previousCareerYears}${row}`, extractCareerYears(person.previousCareer), 'n');
+      annualXml = setCellInSheetXml(annualXml, `${col.standardHours}${row}`, getStandardHours(person.jobType, person.workType), 'n');
+    });
+
+    zip.file(annualPath, annualXml);
+    zip.file(calendarPath, calendarXml);
+
+    const outBlob = await zip.generateAsync({
+      type: 'blob',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+
+    const url = URL.createObjectURL(outBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `연차유급휴가_일수산출내역_${year}학년도.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    setStatus('엑셀 파일이 다운로드되었습니다. (원본 서식·수식 그대로 유지)');
+
+  } catch (err) {
+    console.error(err);
+    setStatus('엑셀 다운로드 중 오류가 발생했습니다.\n' + err.message, true);
+  }
+});
+</script>
+
+</body>
+</html>
